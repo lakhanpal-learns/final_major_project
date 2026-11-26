@@ -32,6 +32,8 @@ def generate_transactions(
             raise ValueError(f"{name} cannot be negative")
     if len(registry.accounts) < 2:
         raise ValueError("registry must contain at least two accounts")
+    if aml_count >= 3 and len(registry.accounts) < 4:
+        raise ValueError("at least four accounts are required for AML graph scenarios")
 
     rng = random.Random(seed)
     accounts = list(registry.accounts)
