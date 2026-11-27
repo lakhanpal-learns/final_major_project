@@ -97,3 +97,14 @@ def test_generator_rejects_invalid_counts_and_small_registry() -> None:
     small_registry = build_registry(customer_count=1)
     with __import__("pytest").raises(ValueError, match="at least two accounts"):
         generate_transactions(small_registry)
+
+def test_normal_activity_includes_legitimate_fan_in_hard_negative() -> None:
+    registry = build_registry(customer_count=12, seed=17)
+    transactions = generate_transactions(
+        registry, normal_count=3, fraud_count=0, aml_count=0, seed=18
+    )
+
+    assert len(transactions) == 3
+    assert all(not item.is_fraud and not item.is_aml_suspicious for item in transactions)
+    assert len({item.receiver_account_id for item in transactions}) == 1
+    assert len({item.timestamp.date() for item in transactions}) == 1

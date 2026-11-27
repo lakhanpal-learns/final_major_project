@@ -194,8 +194,7 @@ def generate_transactions(
                 sender_id, receiver_id = other, normal_hub
             else:
                 sender_id, receiver_id = normal_hub, other
-            sender = registry.get_account(sender_id)
-            profile = profiles[sender_id]
+                        profile = profiles[sender_id]
             timestamp = normal_group_time + timedelta(minutes=group_offset)
         else:
             sender, receiver = rng.sample(accounts, 2)
