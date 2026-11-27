@@ -130,7 +130,6 @@ class LiveBankingEngine:
             return transaction_id
 
     def _run(self) -> None:
-        next_run = time.monotonic()
         while not self._stop_event.is_set():
             self._resume_event.wait()
             if self._stop_event.is_set():
@@ -144,8 +143,7 @@ class LiveBankingEngine:
             except Exception as exc:  # keep worker alive; expose failure to operations API
                 with self._lock:
                     self._last_error = f"{type(exc).__name__}: {exc}"
-            next_run += self._interval
-            delay = max(0.0, next_run - time.monotonic())
-            self._stop_event.wait(delay)
+            # Delay after each committed attempt; do not burst to catch up after DB latency.
+            self._stop_event.wait(self._interval)
         with self._lock:
             self._state = "stopped"
