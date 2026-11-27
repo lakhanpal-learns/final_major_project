@@ -89,7 +89,8 @@ These checks validate internal consistency only. They do not prove real-world re
 
 ## 6. Complete source and test code
 
-The code below is copied from the committed source files. Each listing is the implementation referenced by this task.
+The code below is copied from the current committed source files. Each listing is the implementation referenced by this task.
+
 ### backend/app/services/registry.py
 
 **Purpose:** Creates stable canonical customer/account IDs and deterministic synthetic opening balances.
@@ -500,7 +501,11 @@ def generate_transactions(
         scenario = _FRAUD_SCENARIOS[fraud_group_number % len(_FRAUD_SCENARIOS)]
         fraud_group_number += 1
         sender = rng.choice(account_ids)
-        recipients = rng.sample([item for item in account_ids if item != sender], group_size)
+        available_recipients = [item for item in account_ids if item != sender]
+        if group_size <= len(available_recipients):
+            recipients = rng.sample(available_recipients, group_size)
+        else:
+            recipients = [rng.choice(available_recipients) for _ in range(group_size)]
         profile = profiles[sender]
         start_time = _timestamp(base_time, rng, profile)
         for offset, receiver in enumerate(recipients):
@@ -694,7 +699,7 @@ def audit_ledger(
 
 ### backend/tests/test_transaction_generator.py
 
-**Purpose:** Tests generator counts, canonical account references, reproducibility, independent labels, balance snapshots, AML typologies and normal network hard negatives.
+**Purpose:** Tests generator counts, canonical account references, reproducibility, independent labels, balance snapshots, AML typologies, normal hard negatives and small-registry behavior.
 
 ```python
 from app.services.registry import build_registry
@@ -808,6 +813,16 @@ def test_normal_activity_includes_legitimate_fan_in_hard_negative() -> None:
     assert len({item.receiver_account_id for item in transactions}) == 1
     assert len({item.timestamp.date() for item in transactions}) == 1
 
+def test_fraud_generation_supports_two_account_registry() -> None:
+    registry = build_registry(customer_count=2, seed=19)
+    transactions = generate_transactions(
+        registry, normal_count=2, fraud_count=5, aml_count=0, seed=20
+    )
+
+    assert len(transactions) == 7
+    assert sum(item.is_fraud for item in transactions) == 5
+    assert all(item.sender_account_id != item.receiver_account_id for item in transactions)
+
 ```
 
 ### backend/tests/test_data_quality.py
@@ -870,6 +885,7 @@ def test_feature_allowlist_and_exclusions_are_explicit() -> None:
     assert "aml_typology" in MODEL_EXCLUDED_FIELDS
 
 ```
+
 ## 7. Verification status
 
 - Generator and data-quality tests are committed.
