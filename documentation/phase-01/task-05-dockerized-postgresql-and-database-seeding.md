@@ -186,10 +186,10 @@ def test_seed_database_persists_shared_banking_data(session: Session) -> None:
         aml_count=4,
     )
 
-    assert counts == {"customers": 10, "accounts": 11, "transactions": 18}
+    assert counts == {"customers": 10, "accounts": 11, "transactions": 17}
     assert len(list_customers(session)) == 10
     assert len(list_accounts(session)) == 11
-    assert len(list_transactions(session)) == 18
+    assert len(list_transactions(session)) == 17
 
 
 def test_seed_database_refuses_to_duplicate_existing_data(session: Session) -> None:
@@ -231,7 +231,7 @@ Expected default seed counts:
 
 - Customers: 100
 - Accounts: 110 (one per customer, plus a second account for every tenth customer)
-- Transactions: 550 (500 normal + 25 fraud-labelled + 25 AML-labelled)
+- Transactions: 549 (500 normal-only + 25 fraud-positive + 25 AML-positive - 1 cross-labelled transaction)
 
 Run the full test suite from `backend`:
 
@@ -267,3 +267,13 @@ Do not describe PostgreSQL as verified until the container starts, `python -m ap
 - Schema creation still uses SQLAlchemy `create_all`; Alembic migrations are not implemented.
 - Local development credentials are intentionally simple and must be replaced for any shared deployment.
 - Kafka streaming, outbox publishing, API endpoints for database reads, and model pipelines remain future tasks.
+
+---
+
+## 2026-11-27 update — New generator defaults and database schema
+
+The redesigned generator defaults to one cross-labelled transaction when both fraud and AML counts are non-zero. The default total is therefore 549 rows: 500 normal-only + 25 fraud-positive + 25 AML-positive - 1 overlap.
+
+The transaction table now includes four optional balance snapshot columns. If this database was created before the schema change, apply the four `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements documented in `task-04-postgresql-persistence.md` before running the updated application. SQLAlchemy `create_all()` does not alter an existing table.
+
+Seed test expected count for the small fixture is now 17 rows (12 normal-only + 2 fraud-positive + 4 AML-positive - 1 overlap). Test execution and a real PostgreSQL seed/read-back remain pending.

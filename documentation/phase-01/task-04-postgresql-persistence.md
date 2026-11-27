@@ -410,3 +410,345 @@ The \`create_schema\` helper uses SQLAlchemy \`create_all\` for initial local de
 - No Alembic migrations exist yet.
 - No Kafka outbox or event publisher is implemented yet.
 - Repository functions flush but do not commit; transaction boundaries are controlled by the calling service/session.
+
+---
+
+## 2026-11-27 update — Persisting transaction balance snapshots
+
+The shared synthetic generator now records event-time balance snapshots. The following existing files were updated:
+
+| File | Purpose of update |
+|---|---|
+| `backend/app/db/tables.py` | Adds four nullable numeric columns to the transaction table for sender/receiver balances before and after a transfer. |
+| `backend/app/db/repository.py` | Writes and reads the four balance snapshot fields during transaction persistence. |
+| `backend/app/models/transaction.py` | Adds matching optional Decimal fields to the Pydantic transaction model. |
+| `backend/tests/test_persistence.py` | Updates the expected row count for cross-labelled transactions and checks snapshot round-trip data. |
+
+### Updated transaction table mapping — `backend/app/db/tables.py`
+
+**Purpose:** Stores four event-time balance values alongside each canonical transaction. Fields are nullable so older persisted rows remain readable after the database is migrated.
+
+```python
+"""Relational table mappings for the canonical banking ledger."""
+
+from datetime import datetime
+from decimal import Decimal
+
+from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String
+from sqlalchemy.orm import Mapped, mapped_column
+
+from app.db.database import Base
+
+
+class CustomerRow(Base):
+    __tablename__ = "customers"
+
+    customer_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    full_name: Mapped[str] = mapped_column(String(160), nullable=False)
+    customer_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    city: Mapped[str] = mapped_column(String(100), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AccountRow(Base):
+    __tablename__ = "accounts"
+
+    account_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    account_number: Mapped[str] = mapped_column(String(32), nullable=False, unique=True)
+    customer_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("customers.customer_id"), nullable=False, index=True
+    )
+    account_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    balance: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    opened_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class TransactionRow(Base):
+    __tablename__ = "transactions"
+
+    transaction_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    sender_account_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("accounts.account_id"), nullable=False, index=True
+    )
+    receiver_account_id: Mapped[str] = mapped_column(
+        String(32), ForeignKey("accounts.account_id"), nullable=False, index=True
+    )
+    amount: Mapped[Decimal] = mapped_column(Numeric(18, 2), nullable=False)
+    currency: Mapped[str] = mapped_column(String(3), nullable=False)
+    transaction_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    channel: Mapped[str] = mapped_column(String(20), nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)
+    timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    sender_balance_before: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    sender_balance_after: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    receiver_balance_before: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    receiver_balance_after: Mapped[Decimal | None] = mapped_column(Numeric(18, 2), nullable=True)
+    is_fraud: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    is_aml_suspicious: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    fraud_scenario: Mapped[str | None] = mapped_column(String(80), nullable=True)
+    aml_typology: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+```
+
+### Updated repository — `backend/app/db/repository.py`
+
+**Purpose:** Persists and reconstructs balance snapshots while preserving the existing transaction boundary (repository functions flush; caller commits or rolls back).
+
+```python
+"""Persistence operations for the canonical customer/account/transaction ledger."""
+
+from sqlalchemy import select
+from sqlalchemy.orm import Session
+
+from app.db.tables import AccountRow, CustomerRow, TransactionRow
+from app.models.banking import Account, Customer
+from app.models.transaction import Transaction
+from app.services.registry import BankingRegistry
+
+
+def save_registry(session: Session, registry: BankingRegistry) -> None:
+    """Insert canonical customers and accounts into the current transaction."""
+    session.add_all([
+        CustomerRow(
+            customer_id=item.customer_id,
+            full_name=item.full_name,
+            customer_type=item.customer_type,
+            city=item.city,
+            created_at=item.created_at,
+        )
+        for item in registry.customers
+    ])
+    session.flush()
+    session.add_all([
+        AccountRow(
+            account_id=item.account_id,
+            account_number=item.account_number,
+            customer_id=item.customer_id,
+            account_type=item.account_type,
+            currency=item.currency,
+            balance=item.balance,
+            status=item.status,
+            opened_at=item.opened_at,
+        )
+        for item in registry.accounts
+    ])
+    session.flush()
+
+
+def save_transactions(session: Session, transactions: list[Transaction]) -> None:
+    """Insert transactions after their referenced accounts have been persisted."""
+    session.add_all([
+        TransactionRow(
+            transaction_id=item.transaction_id,
+            sender_account_id=item.sender_account_id,
+            receiver_account_id=item.receiver_account_id,
+            amount=item.amount,
+            currency=item.currency,
+            transaction_type=item.transaction_type,
+            channel=item.channel,
+            status=item.status,
+            timestamp=item.timestamp,
+            sender_balance_before=item.sender_balance_before,
+            sender_balance_after=item.sender_balance_after,
+            receiver_balance_before=item.receiver_balance_before,
+            receiver_balance_after=item.receiver_balance_after,
+            is_fraud=item.is_fraud,
+            is_aml_suspicious=item.is_aml_suspicious,
+            fraud_scenario=item.fraud_scenario,
+            aml_typology=item.aml_typology,
+        )
+        for item in transactions
+    ])
+    session.flush()
+
+
+def list_customers(session: Session) -> list[Customer]:
+    rows = session.scalars(select(CustomerRow).order_by(CustomerRow.customer_id)).all()
+    return [
+        Customer(
+            customer_id=row.customer_id,
+            full_name=row.full_name,
+            customer_type=row.customer_type,
+            city=row.city,
+            created_at=row.created_at,
+        )
+        for row in rows
+    ]
+
+
+def list_accounts(session: Session) -> list[Account]:
+    rows = session.scalars(select(AccountRow).order_by(AccountRow.account_id)).all()
+    return [
+        Account(
+            account_id=row.account_id,
+            account_number=row.account_number,
+            customer_id=row.customer_id,
+            account_type=row.account_type,
+            currency=row.currency,
+            balance=row.balance,
+            status=row.status,
+            opened_at=row.opened_at,
+        )
+        for row in rows
+    ]
+
+
+def list_transactions(session: Session) -> list[Transaction]:
+    rows = session.scalars(
+        select(TransactionRow).order_by(TransactionRow.timestamp, TransactionRow.transaction_id)
+    ).all()
+    return [
+        Transaction(
+            transaction_id=row.transaction_id,
+            sender_account_id=row.sender_account_id,
+            receiver_account_id=row.receiver_account_id,
+            amount=row.amount,
+            currency=row.currency,
+            transaction_type=row.transaction_type,
+            channel=row.channel,
+            status=row.status,
+            timestamp=row.timestamp,
+            sender_balance_before=row.sender_balance_before,
+            sender_balance_after=row.sender_balance_after,
+            receiver_balance_before=row.receiver_balance_before,
+            receiver_balance_after=row.receiver_balance_after,
+            is_fraud=row.is_fraud,
+            is_aml_suspicious=row.is_aml_suspicious,
+            fraud_scenario=row.fraud_scenario,
+            aml_typology=row.aml_typology,
+        )
+        for row in rows
+    ]
+
+```
+
+### Schema migration note
+
+`Base.metadata.create_all()` creates missing tables but does not add columns to an existing PostgreSQL table. Before using an existing database, apply this additive migration once:
+
+```sql
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sender_balance_before NUMERIC(18, 2);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS sender_balance_after NUMERIC(18, 2);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS receiver_balance_before NUMERIC(18, 2);
+ALTER TABLE transactions ADD COLUMN IF NOT EXISTS receiver_balance_after NUMERIC(18, 2);
+```
+
+Existing rows will have NULL snapshots. Newly generated transactions will include snapshots. This is a manual development migration; Alembic versioned migrations are still not implemented.
+
+### Updated persistence test — `backend/tests/test_persistence.py`
+
+**Purpose:** Verifies the current generated row count and confirms balance snapshot fields are present after persistence. The test database is in-memory SQLite, not PostgreSQL.
+
+```python
+import pytest
+from sqlalchemy import create_engine, event
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import Session
+from sqlalchemy.pool import StaticPool
+
+from app.db.database import create_schema
+from app.db.repository import (
+    list_accounts,
+    list_customers,
+    list_transactions,
+    save_registry,
+    save_transactions,
+)
+from app.services.registry import build_registry
+from app.services.transaction_generator import generate_transactions
+
+
+@pytest.fixture
+def session() -> Session:
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+    )
+
+    @event.listens_for(engine, "connect")
+    def enable_sqlite_foreign_keys(connection, _record) -> None:
+        cursor = connection.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
+
+    create_schema(engine)
+    with Session(engine) as db_session:
+        yield db_session
+    engine.dispose()
+
+
+def test_registry_and_transactions_round_trip_through_database(session: Session) -> None:
+    registry = build_registry(customer_count=20, seed=12)
+    transactions = generate_transactions(
+        registry, normal_count=30, fraud_count=4, aml_count=6, seed=13
+    )
+
+    save_registry(session, registry)
+    save_transactions(session, transactions)
+    session.commit()
+
+    loaded_customers = list_customers(session)
+    loaded_accounts = list_accounts(session)
+    loaded_transactions = list_transactions(session)
+
+    assert len(loaded_customers) == 20
+    assert len(loaded_accounts) == 22
+    assert len(loaded_transactions) == 39
+    assert loaded_accounts[0].customer_id in {
+        customer.customer_id for customer in loaded_customers
+    }
+    assert loaded_transactions[0].sender_balance_before is not None
+    assert loaded_transactions[0].receiver_balance_after is not None
+    assert {item.transaction_id for item in loaded_transactions} == {
+        item.transaction_id for item in transactions
+    }
+
+
+def test_database_rejects_account_with_unknown_customer(session: Session) -> None:
+    from app.db.tables import AccountRow
+
+    session.add(
+        AccountRow(
+            account_id="ACC99999999",
+            account_number="999999999999",
+            customer_id="MISSING_CUSTOMER",
+            account_type="SAVINGS",
+            currency="INR",
+            balance=100,
+            status="ACTIVE",
+            opened_at=build_registry(1).customers[0].created_at,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+
+def test_database_rejects_transaction_with_unknown_account(session: Session) -> None:
+    from app.db.tables import TransactionRow
+
+    session.add(
+        TransactionRow(
+            transaction_id="TXN9999999999",
+            sender_account_id="MISSING_A",
+            receiver_account_id="MISSING_B",
+            amount=100,
+            currency="INR",
+            transaction_type="TRANSFER",
+            channel="UPI",
+            status="COMPLETED",
+            timestamp=build_registry(1).customers[0].created_at,
+            is_fraud=False,
+            is_aml_suspicious=False,
+        )
+    )
+
+    with pytest.raises(IntegrityError):
+        session.commit()
+
+```
+
+Local test execution is still pending. Do not treat PostgreSQL persistence as verified until the user runs the tests and separately verifies the actual PostgreSQL connection.
