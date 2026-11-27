@@ -122,3 +122,74 @@ def list_transactions(session: Session) -> list[Transaction]:
         )
         for row in rows
     ]
+
+def persist_live_transfer(
+    session: Session,
+    *,
+    transaction_id: str,
+    sender_account_id: str,
+    receiver_account_id: str,
+    amount,
+    timestamp,
+    channel: str,
+) -> None:
+    """Atomically update account balances and insert one live ledger event.
+
+    PostgreSQL row locks serialize concurrent updates to the same accounts.
+    The caller owns the transaction and must commit or roll it back.
+    """
+    from decimal import Decimal
+
+    from app.db.tables import TransactionRow
+
+    if sender_account_id == receiver_account_id:
+        raise ValueError("sender and receiver must be different accounts")
+    transfer_amount = Decimal(amount).quantize(Decimal("0.01"))
+    if transfer_amount <= 0:
+        raise ValueError("transfer amount must be positive")
+
+    account_ids = sorted((sender_account_id, receiver_account_id))
+    rows = session.scalars(
+        select(AccountRow)
+        .where(AccountRow.account_id.in_(account_ids))
+        .order_by(AccountRow.account_id)
+        .with_for_update()
+    ).all()
+    by_id = {row.account_id: row for row in rows}
+    if len(by_id) != 2:
+        raise ValueError("sender and receiver accounts must both exist")
+
+    sender = by_id[sender_account_id]
+    receiver = by_id[receiver_account_id]
+    if sender.status != "ACTIVE" or receiver.status != "ACTIVE":
+        raise ValueError("both accounts must be active")
+    sender_before = Decimal(sender.balance)
+    receiver_before = Decimal(receiver.balance)
+    if transfer_amount > sender_before:
+        raise ValueError("insufficient sender balance")
+
+    sender.balance = sender_before - transfer_amount
+    receiver.balance = receiver_before + transfer_amount
+    session.add(
+        TransactionRow(
+            transaction_id=transaction_id,
+            sender_account_id=sender_account_id,
+            receiver_account_id=receiver_account_id,
+            amount=transfer_amount,
+            currency=sender.currency,
+            transaction_type="TRANSFER",
+            channel=channel,
+            status="COMPLETED",
+            timestamp=timestamp,
+            sender_balance_before=sender_before,
+            sender_balance_after=sender.balance,
+            receiver_balance_before=receiver_before,
+            receiver_balance_after=receiver.balance,
+            is_fraud=False,
+            is_aml_suspicious=False,
+            fraud_scenario=None,
+            aml_typology=None,
+        )
+    )
+    session.flush()
+
