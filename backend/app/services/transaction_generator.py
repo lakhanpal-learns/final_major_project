@@ -175,10 +175,34 @@ def generate_transactions(
     events: list[_Event] = []
 
     # Normal activity: profile-influenced amounts, channels and active hours.
-    # Eight percent are legitimate high-value hard negatives by design.
-    for _index in range(normal_count):
-        sender, receiver = rng.sample(accounts, 2)
-        profile = profiles[sender.account_id]
+    # High-value and legitimate fan-in/fan-out lookalikes are hard negatives.
+    normal_hub: str | None = None
+    normal_group_time: datetime | None = None
+    normal_group_is_fan_in = True
+    for index in range(normal_count):
+        group_offset = index % 20
+        if group_offset < 3:
+            if group_offset == 0:
+                normal_hub = rng.choice(account_ids)
+                normal_group_time = base_time + timedelta(
+                    days=rng.randrange(30), hours=rng.randrange(24), minutes=rng.randrange(60)
+                )
+                normal_group_is_fan_in = (index // 20) % 2 == 0
+            assert normal_hub is not None and normal_group_time is not None
+            other = rng.choice([item for item in account_ids if item != normal_hub])
+            if normal_group_is_fan_in:
+                sender_id, receiver_id = other, normal_hub
+            else:
+                sender_id, receiver_id = normal_hub, other
+            sender = registry.get_account(sender_id)
+            profile = profiles[sender_id]
+            timestamp = normal_group_time + timedelta(minutes=group_offset)
+        else:
+            sender, receiver = rng.sample(accounts, 2)
+            sender_id, receiver_id = sender.account_id, receiver.account_id
+            profile = profiles[sender_id]
+            timestamp = _timestamp(base_time, rng, profile)
+
         if rng.random() < 0.08:
             amount = Decimal(rng.randrange(50_000, 350_001))
         else:
@@ -186,10 +210,10 @@ def generate_transactions(
             amount = Decimal(str(min(200_000, max(100, round(sampled)))))
         events.append(
             _event(
-                sender.account_id,
-                receiver.account_id,
+                sender_id,
+                receiver_id,
                 amount,
-                _timestamp(base_time, rng, profile),
+                timestamp,
                 rng,
                 channels=profile.channels,
             )
