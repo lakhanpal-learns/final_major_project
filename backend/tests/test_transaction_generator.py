@@ -108,3 +108,13 @@ def test_normal_activity_includes_legitimate_fan_in_hard_negative() -> None:
     assert all(not item.is_fraud and not item.is_aml_suspicious for item in transactions)
     assert len({item.receiver_account_id for item in transactions}) == 1
     assert len({item.timestamp.date() for item in transactions}) == 1
+
+def test_fraud_generation_supports_two_account_registry() -> None:
+    registry = build_registry(customer_count=2, seed=19)
+    transactions = generate_transactions(
+        registry, normal_count=2, fraud_count=5, aml_count=0, seed=20
+    )
+
+    assert len(transactions) == 7
+    assert sum(item.is_fraud for item in transactions) == 5
+    assert all(item.sender_account_id != item.receiver_account_id for item in transactions)

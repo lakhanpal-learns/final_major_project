@@ -275,7 +275,11 @@ def generate_transactions(
         scenario = _FRAUD_SCENARIOS[fraud_group_number % len(_FRAUD_SCENARIOS)]
         fraud_group_number += 1
         sender = rng.choice(account_ids)
-        recipients = rng.sample([item for item in account_ids if item != sender], group_size)
+        available_recipients = [item for item in account_ids if item != sender]
+        if group_size <= len(available_recipients):
+            recipients = rng.sample(available_recipients, group_size)
+        else:
+            recipients = [rng.choice(available_recipients) for _ in range(group_size)]
         profile = profiles[sender]
         start_time = _timestamp(base_time, rng, profile)
         for offset, receiver in enumerate(recipients):
