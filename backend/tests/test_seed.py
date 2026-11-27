@@ -30,10 +30,10 @@ def test_seed_database_persists_shared_banking_data(session: Session) -> None:
         aml_count=4,
     )
 
-    assert counts == {"customers": 10, "accounts": 11, "transactions": 18}
+    assert counts == {"customers": 10, "accounts": 11, "transactions": 17}
     assert len(list_customers(session)) == 10
     assert len(list_accounts(session)) == 11
-    assert len(list_transactions(session)) == 18
+    assert len(list_transactions(session)) == 17
 
 
 def test_seed_database_refuses_to_duplicate_existing_data(session: Session) -> None:

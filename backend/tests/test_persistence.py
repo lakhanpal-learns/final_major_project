@@ -52,10 +52,12 @@ def test_registry_and_transactions_round_trip_through_database(session: Session)
 
     assert len(loaded_customers) == 20
     assert len(loaded_accounts) == 22
-    assert len(loaded_transactions) == 40
+    assert len(loaded_transactions) == 39
     assert loaded_accounts[0].customer_id in {
         customer.customer_id for customer in loaded_customers
     }
+    assert loaded_transactions[0].sender_balance_before is not None
+    assert loaded_transactions[0].receiver_balance_after is not None
     assert {item.transaction_id for item in loaded_transactions} == {
         item.transaction_id for item in transactions
     }

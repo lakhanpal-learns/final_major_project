@@ -2,16 +2,22 @@ from app.services.registry import build_registry
 from app.services.transaction_generator import generate_transactions
 
 
-def test_generator_creates_requested_counts_and_labels() -> None:
+def test_generator_creates_requested_label_counts_with_overlap() -> None:
     registry = build_registry(customer_count=30, seed=3)
     transactions = generate_transactions(
-        registry, normal_count=40, fraud_count=5, aml_count=6, seed=11
+        registry,
+        normal_count=40,
+        fraud_count=5,
+        aml_count=6,
+        seed=11,
+        overlap_count=1,
     )
 
-    assert len(transactions) == 51
+    assert len(transactions) == 50
     assert sum(item.is_fraud for item in transactions) == 5
     assert sum(item.is_aml_suspicious for item in transactions) == 6
     assert sum(not item.is_fraud and not item.is_aml_suspicious for item in transactions) == 40
+    assert sum(item.is_fraud and item.is_aml_suspicious for item in transactions) == 1
 
 
 def test_every_transaction_uses_registry_accounts_and_no_self_transfer() -> None:
@@ -31,20 +37,52 @@ def test_transaction_ids_are_unique_and_generation_is_reproducible() -> None:
 
     assert len({item.transaction_id for item in first}) == len(first)
     assert [item.model_dump() for item in first] == [item.model_dump() for item in second]
+    assert not first[0].transaction_id.endswith("0000000001")
 
 
-def test_fraud_and_aml_labels_are_separate() -> None:
+def test_fraud_and_aml_have_independent_scenario_metadata() -> None:
     registry = build_registry(customer_count=30)
-    transactions = generate_transactions(registry, 10, 4, 4)
+    transactions = generate_transactions(registry, 10, 8, 10, overlap_count=2)
 
     fraud_events = [item for item in transactions if item.is_fraud]
     aml_events = [item for item in transactions if item.is_aml_suspicious]
+    both_events = [item for item in transactions if item.is_fraud and item.is_aml_suspicious]
 
-    assert all(item.fraud_scenario == "HIGH_VALUE_UNUSUAL_TRANSFER" for item in fraud_events)
+    assert len(fraud_events) == 8
+    assert len(aml_events) == 10
+    assert len(both_events) == 2
+    assert all(item.fraud_scenario is not None for item in fraud_events)
     assert all(item.aml_typology is not None for item in aml_events)
+    assert all(item.aml_typology is None for item in fraud_events if not item.is_aml_suspicious)
 
 
-def test_generator_rejects_negative_counts_and_too_small_registry() -> None:
+def test_generator_mixes_timestamps_and_creates_balance_snapshots() -> None:
+    registry = build_registry(customer_count=30, seed=31)
+    transactions = generate_transactions(registry, 100, 20, 15, seed=32)
+
+    assert transactions == sorted(transactions, key=lambda item: item.timestamp)
+    assert (transactions[-1].timestamp - transactions[0].timestamp).days >= 10
+    for item in transactions:
+        assert item.sender_balance_before is not None
+        assert item.sender_balance_after is not None
+        assert item.receiver_balance_before is not None
+        assert item.receiver_balance_after is not None
+        assert item.sender_balance_before >= item.amount
+        assert item.sender_balance_before - item.amount == item.sender_balance_after
+        assert item.receiver_balance_before + item.amount == item.receiver_balance_after
+
+
+def test_aml_generator_covers_multiple_network_typologies() -> None:
+    registry = build_registry(customer_count=40, seed=8)
+    transactions = generate_transactions(registry, 100, 10, 25, seed=9)
+    typologies = {item.aml_typology for item in transactions if item.is_aml_suspicious}
+
+    assert {
+        "STRUCTURING", "FAN_IN", "FAN_OUT", "LAYERING", "CIRCULAR_TRANSFER"
+    }.issubset(typologies)
+
+
+def test_generator_rejects_invalid_counts_and_small_registry() -> None:
     registry = build_registry(customer_count=10)
     try:
         generate_transactions(registry, normal_count=-1)
@@ -53,10 +91,9 @@ def test_generator_rejects_negative_counts_and_too_small_registry() -> None:
     else:
         raise AssertionError("Expected ValueError for negative count")
 
+    with __import__("pytest").raises(ValueError, match="at least 3"):
+        generate_transactions(registry, aml_count=2)
+
     small_registry = build_registry(customer_count=1)
-    try:
+    with __import__("pytest").raises(ValueError, match="at least two accounts"):
         generate_transactions(small_registry)
-    except ValueError as error:
-        assert "at least two accounts" in str(error)
-    else:
-        raise AssertionError("Expected ValueError for one-account registry")
