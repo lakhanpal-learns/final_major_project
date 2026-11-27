@@ -71,6 +71,7 @@ from sqlalchemy.orm import Session
 from app.db.database import create_db_engine, create_schema, create_session_factory
 from app.db.repository import save_registry, save_transactions
 from app.db.tables import AccountRow, CustomerRow, TransactionRow
+from app.services.data_quality import audit_ledger
 from app.services.registry import build_registry
 from app.services.transaction_generator import generate_transactions
 
@@ -104,6 +105,7 @@ def seed_database(
         aml_count=aml_count,
         seed=transaction_seed,
     )
+    audit_ledger(registry, transactions)
 
     try:
         save_registry(session, registry)
@@ -137,6 +139,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+
 ```
 
 **Purpose and flow:**
@@ -277,3 +280,9 @@ The redesigned generator defaults to one cross-labelled transaction when both fr
 The transaction table now includes four optional balance snapshot columns. If this database was created before the schema change, apply the four `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statements documented in `task-04-postgresql-persistence.md` before running the updated application. SQLAlchemy `create_all()` does not alter an existing table.
 
 Seed test expected count for the small fixture is now 17 rows (12 normal-only + 2 fraud-positive + 4 AML-positive - 1 overlap). Test execution and a real PostgreSQL seed/read-back remain pending.
+
+### 2026-11-27 seed validation update
+
+The seed command now calls the shared ledger audit before persistence. This prevents a generated dataset with invalid account references, inconsistent fraud/AML metadata, missing balance snapshots or overdraft arithmetic from being inserted by the seed workflow.
+
+Updated source file: `backend/app/seed.py`. The full current implementation is shown in section 3.3 above. Local execution is still pending.
