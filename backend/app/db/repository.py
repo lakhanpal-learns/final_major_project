@@ -51,6 +51,10 @@ def save_transactions(session: Session, transactions: list[Transaction]) -> None
             channel=item.channel,
             status=item.status,
             timestamp=item.timestamp,
+            sender_balance_before=item.sender_balance_before,
+            sender_balance_after=item.sender_balance_after,
+            receiver_balance_before=item.receiver_balance_before,
+            receiver_balance_after=item.receiver_balance_after,
             is_fraud=item.is_fraud,
             is_aml_suspicious=item.is_aml_suspicious,
             fraud_scenario=item.fraud_scenario,
@@ -94,7 +98,7 @@ def list_accounts(session: Session) -> list[Account]:
 
 def list_transactions(session: Session) -> list[Transaction]:
     rows = session.scalars(
-        select(TransactionRow).order_by(TransactionRow.transaction_id)
+        select(TransactionRow).order_by(TransactionRow.timestamp, TransactionRow.transaction_id)
     ).all()
     return [
         Transaction(
@@ -107,6 +111,10 @@ def list_transactions(session: Session) -> list[Transaction]:
             channel=row.channel,
             status=row.status,
             timestamp=row.timestamp,
+            sender_balance_before=row.sender_balance_before,
+            sender_balance_after=row.sender_balance_after,
+            receiver_balance_before=row.receiver_balance_before,
+            receiver_balance_after=row.receiver_balance_after,
             is_fraud=row.is_fraud,
             is_aml_suspicious=row.is_aml_suspicious,
             fraud_scenario=row.fraud_scenario,
