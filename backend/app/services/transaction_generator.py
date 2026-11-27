@@ -284,7 +284,7 @@ def generate_transactions(
         start_time = _timestamp(base_time, rng, profile)
         for offset, receiver in enumerate(recipients):
             if scenario == "HIGH_VALUE_BEHAVIORAL_DEVIATION":
-                amount = rng.randrange(20_000, 400_001)
+                amount = min(400_000, max(20_000, int(profile.typical_amount) * rng.randint(3, 8)))
             elif scenario == "RAPID_REPEATED_TRANSFERS":
                 amount = rng.randrange(2_000, 80_001)
             elif scenario == "UNUSUAL_TIME_CHANNEL_ACTIVITY":
@@ -322,7 +322,7 @@ def generate_transactions(
         sender_before = balances[item.sender]
         receiver_before = balances[item.receiver]
         # Cap each transfer to a fraction of available funds to prevent overdraft.
-        amount = min(item.requested_amount, sender_before * Decimal("0.25"))
+        amount = min(item.requested_amount, sender_before * _MAX_TRANSFER_SHARE)
         amount = amount.quantize(_CENT, rounding=ROUND_DOWN)
         if amount < _CENT:
             amount = sender_before.quantize(_CENT, rounding=ROUND_DOWN)

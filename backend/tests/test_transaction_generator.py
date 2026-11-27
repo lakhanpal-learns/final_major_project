@@ -1,3 +1,5 @@
+import pytest
+
 from app.services.registry import build_registry
 from app.services.transaction_generator import generate_transactions
 
@@ -91,7 +93,7 @@ def test_generator_rejects_invalid_counts_and_small_registry() -> None:
     else:
         raise AssertionError("Expected ValueError for negative count")
 
-    with __import__("pytest").raises(ValueError, match="at least 3"):
+    with pytest.raises(ValueError, match="at least 3"):
         generate_transactions(registry, aml_count=2)
 
     small_registry = build_registry(customer_count=1)
