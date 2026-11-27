@@ -19,8 +19,8 @@ _CHANNELS = ("UPI", "IMPS", "NEFT", "RTGS", "INTERNAL")
 _FRAUD_SCENARIOS = (
     "HIGH_VALUE_BEHAVIORAL_DEVIATION",
     "RAPID_REPEATED_TRANSFERS",
-    "ACCOUNT_TAKEOVER_LIKE_ACTIVITY",
-    "NEW_BENEFICIARY_BURST",
+    "UNUSUAL_TIME_CHANNEL_ACTIVITY",
+    "MULTI_RECIPIENT_BURST",
 )
 _AML_TYPOLOGIES = (
     "STRUCTURING",
@@ -260,17 +260,24 @@ def generate_transactions(
                 amount = rng.randrange(20_000, 400_001)
             elif scenario == "RAPID_REPEATED_TRANSFERS":
                 amount = rng.randrange(2_000, 80_001)
-            elif scenario == "ACCOUNT_TAKEOVER_LIKE_ACTIVITY":
+            elif scenario == "UNUSUAL_TIME_CHANNEL_ACTIVITY":
                 amount = rng.randrange(5_000, 250_001)
             else:
                 amount = rng.randrange(3_000, 120_001)
+            event_time = start_time + timedelta(minutes=offset * rng.randrange(1, 4))
+            event_channels = _CHANNELS
+            if scenario == "UNUSUAL_TIME_CHANNEL_ACTIVITY":
+                unusual_hour = (profile.active_hour + rng.choice((7, 8, 9, 10))) % 24
+                event_time = start_time.replace(hour=unusual_hour)
+                event_channels = tuple(channel for channel in _CHANNELS if channel not in profile.channels)
             events.append(
                 _event(
                     sender,
                     receiver,
                     amount,
-                    start_time + timedelta(minutes=offset * rng.randrange(1, 4)),
+                    event_time,
                     rng,
+                    channels=event_channels or _CHANNELS,
                     fraud=True,
                     fraud_scenario=scenario,
                 )
