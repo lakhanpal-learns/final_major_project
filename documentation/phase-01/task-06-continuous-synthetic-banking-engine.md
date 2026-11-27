@@ -2,7 +2,7 @@
 
 ## Status
 
-Implementation committed to `main`. The previous backend baseline was **23 tests passed** (user-provided local result). Task 06 tests have been added but have **not yet been run in the user's local environment**. Do not treat the new tests as passing until the next local pytest run.
+Implementation committed to `main` and locally verified by the user. The full repository test suite reports **31 passed** (user-provided local result). Docker PostgreSQL, initial seeding, API access, and live-engine lifecycle were also exercised locally. The exact post-run SQL count and integrity-query values were not captured in the conversation, so they are not stated as numeric results here.
 
 ## Objective
 
@@ -115,7 +115,7 @@ New tests cover:
 - Custom rate configuration.
 - Invalid rate values.
 
-Expected total after adding these tests is 31 tests, assuming the previous 23 tests remain unchanged. This is an expected collection count, not a claimed test result.
+**Observed local result (user-provided): 31 passed.** The user ran `python -m pytest` from the repository root. This is a reported local result, not a CI result.
 
 ---
 
@@ -702,3 +702,72 @@ def test_invalid_live_rate_is_rejected(monkeypatch, value):
         get_transactions_per_second()
 
 ```
+
+
+---
+
+## Local Docker/PostgreSQL integration verification
+
+The following results were reported by the user during the local Windows/PowerShell verification session on 2026-11-27. These are integration observations, separate from the SQLite automated tests.
+
+### Docker and database startup
+
+- Docker Engine reported version `29.6.1`.
+- Docker Compose reported version `v5.3.0`.
+- The `sentinel-postgres` container used `postgres:16-alpine`, published port `5432`, and reported `Up (healthy)`.
+- The user ran `python -m app.seed` from the `backend` directory. The command reported successful seeding:
+  - Customers: **100**
+  - Accounts: **110**
+  - Transactions: **549**
+
+### API and live-worker observations
+
+- FastAPI Swagger documentation was opened successfully at `/docs`.
+- Initial `GET /simulation/status` response reported:
+  - state: `stopped`
+  - configured rate: `10.0`
+  - generated transactions: `0`
+  - last error: `null`
+- After starting the worker, subsequent status responses reported `running`, with generated transaction counts of **92** and then **128**. Both responses reported `last_error: null`.
+- The user reported successful pause, resume, and stop operations.
+- The user also reported successful completion of the direct PostgreSQL count and integrity checks below. The exact SQL output values were not supplied, so no post-generation transaction count or integrity count is asserted in this document.
+
+### PostgreSQL verification commands
+
+Run from PowerShell; these commands inspect the database directly:
+
+```powershell
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c "SELECT (SELECT COUNT(*) FROM customers) AS customers, (SELECT COUNT(*) FROM accounts) AS accounts, (SELECT COUNT(*) FROM transactions) AS transactions;"
+```
+
+```powershell
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c "SELECT COUNT(*) AS invalid_sender_snapshots FROM transactions WHERE sender_balance_before - amount <> sender_balance_after;"
+```
+
+```powershell
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c "SELECT COUNT(*) AS invalid_receiver_snapshots FROM transactions WHERE receiver_balance_before + amount <> receiver_balance_after;"
+```
+
+```powershell
+docker exec sentinel-postgres psql -U sentinel -d sentinel -c "SELECT COUNT(*) AS negative_balance_accounts FROM accounts WHERE balance < 0;"
+```
+
+Expected integrity-query results are zero invalid sender snapshots, zero invalid receiver snapshots, and zero negative-balance accounts. The user reported the checks succeeded; exact returned values were not recorded.
+
+### Automated test result
+
+From the repository root:
+
+```powershell
+python -m pytest
+```
+
+User-reported output: **31 passed**. One Starlette deprecation warning was shown in the test output; it did not cause a test failure.
+
+### Evidence boundaries and remaining limitations
+
+- The Docker container's healthy status and the seed command's reported row counts establish that the local PostgreSQL container started and the initial dataset was inserted.
+- The live API status counts establish that the worker reported successful generated transactions. The separate SQL checks were reported successful, but their exact output was not retained here.
+- The 31-test suite uses SQLite for its database unit tests; it does not prove PostgreSQL row-lock behavior under concurrent writers.
+- The integration exercise was performed with one local API process. It does not validate multi-process worker coordination, production throughput, or high availability.
+- No Kafka publishing, transactional outbox, data-lake ingestion, model inference, or downstream alerting is part of Task 06.
