@@ -5,7 +5,7 @@
 
 ## 1. Objective
 
-Replace the earlier simplistic generator with one deterministic synthetic bank environment that creates normal banking activity, fraud scenarios and AML network typologies using the same canonical customers and accounts. Both downstream pipelines consume the same transaction ledger.
+Create one deterministic synthetic bank environment that generates normal activity, fraud scenarios and AML network typologies using the same canonical customers and accounts. Both downstream pipelines consume the same transaction ledger.
 
 ## 2. Files and responsibilities
 
@@ -15,7 +15,7 @@ Replace the earlier simplistic generator with one deterministic synthetic bank e
 | `backend/app/models/transaction.py` | Defines transaction fields, independent labels and balance snapshots. |
 | `backend/app/services/transaction_generator.py` | Creates and mixes normal, fraud and AML events; simulates balances; assigns non-sequential IDs. |
 | `backend/app/services/data_quality.py` | Validates generated ledger consistency and declares feature candidates/exclusions. |
-| `backend/tests/test_transaction_generator.py` | Tests generation counts, shared account references, deterministic IDs, label overlap, timestamps, balances and AML typology coverage. |
+| `backend/tests/test_transaction_generator.py` | Tests counts, account references, reproducibility, label overlap, timestamps, balances, AML patterns and legitimate hard negatives. |
 | `backend/tests/test_data_quality.py` | Tests all four label combinations, metadata consistency and feature leakage safeguards. |
 
 ## 3. Generation design
@@ -25,18 +25,19 @@ Replace the earlier simplistic generator with one deterministic synthetic bank e
 - Each account receives a deterministic synthetic behavior profile based on account type.
 - Profiles influence typical transaction amount, preferred channel set and active hours.
 - Amounts use a skewed distribution rather than a uniform random range.
-- Eight percent of normal transactions are deliberately generated as legitimate high-value hard negatives. This is a chosen simulation parameter, not a measured banking prevalence.
+- Approximately 8% of normal events are high-value hard negatives in expectation; this is a generator parameter, not a measured bank prevalence.
+- Every twentieth normal event group begins a three-transfer legitimate fan-in/fan-out-like pattern. These rows remain 0/0 labels and help test whether a model overreacts to network shape alone.
 
 ### Fraud scenarios
 
 | Scenario | Generated pattern |
 |---|---|
-| `HIGH_VALUE_BEHAVIORAL_DEVIATION` | Transfers with larger requested amounts, overlapping the normal amount range. |
+| `HIGH_VALUE_BEHAVIORAL_DEVIATION` | Larger requested transfer amounts, overlapping the normal amount range. |
 | `RAPID_REPEATED_TRANSFERS` | Multiple transfers from one sender to different recipients in a short interval. |
 | `UNUSUAL_TIME_CHANNEL_ACTIVITY` | Transfers at a time and through a channel outside the account profile's preferred behavior. |
 | `MULTI_RECIPIENT_BURST` | A short burst of transfers from one sender to several recipients. |
 
-These are transaction-level synthetic proxies. The current schema does not simulate login events, device fingerprints, IP addresses or historical beneficiary onboarding, so it cannot establish a true account takeover or a genuinely new beneficiary.
+These are transaction-level synthetic proxies. The current schema does not simulate login events, device fingerprints, IP addresses or historical beneficiary onboarding. It therefore cannot establish a true account takeover or a genuinely new beneficiary.
 
 ### AML network typologies
 
@@ -61,39 +62,34 @@ Fraud and AML ground-truth labels are separate booleans. The generator supports 
 | 0 | 1 | AML-only transaction |
 | 1 | 1 | Cross-labelled transaction |
 
-The default overlap is one transaction when both positive class counts are non-zero. `overlap_count` can be set explicitly. `normal_count` counts only 0/0 transactions; `fraud_count` and `aml_count` count their positive labels including overlap. Total rows equal `normal_count + fraud_count + aml_count - overlap_count`.
+The default overlap is one transaction when both positive class counts are non-zero. `overlap_count` can be set explicitly. `normal_count` counts only 0/0 transactions; `fraud_count` and `aml_count` count positive labels including overlap. Total rows equal `normal_count + fraud_count + aml_count - overlap_count`. `aml_count` must be zero or at least three so an AML label represents a multi-transaction pattern.
 
-### Shared time and identifiers
+### Shared time, IDs and balances
 
-- All event types are assigned timestamps across the same 30-day synthetic window.
-- Events are sorted into one chronological ledger; a seeded random tie-breaker mixes events sharing the same timestamp.
-- Transaction IDs use seeded random hexadecimal values instead of a sequential counter, so IDs do not directly reveal generation order.
-- The same registry account IDs are used for both fraud and AML patterns.
-
-### Balance simulation
-
-- Registry account balances are synthetic opening balances.
-- The ledger processes events chronologically and stores sender/receiver balance-before and balance-after snapshots on each transaction.
-- Each transfer is capped at 25% of the sender's currently available balance, preventing a generated completed transfer from overdrawing the account.
-- `accounts.balance` remains the opening balance; event snapshots contain simulated balance changes. A separate persisted account-current-balance projection is not implemented yet.
+- All event types receive timestamps across the same 30-day synthetic window and are merged into one chronological ledger.
+- Seeded random tie-breaking mixes events that share a timestamp.
+- Transaction IDs use seeded random hexadecimal values instead of a sequential counter.
+- Both pipelines use the same canonical account IDs.
+- Account registry balances are opening balances. Each transaction stores sender/receiver balance-before and balance-after snapshots.
+- Each transfer is capped at 25% of the sender's available balance. The account table still stores opening balance; a persisted end-of-period account balance projection is not implemented.
 
 ## 4. Leakage controls
 
-`MODEL_FEATURE_ALLOWLIST` defines candidate inputs for future feature engineering: amount, channel, transaction type, hour/day derived from timestamp, sender/receiver account type and event-time balance snapshots.
+`MODEL_FEATURE_ALLOWLIST` defines candidate future inputs: amount, channel, transaction type, hour/day derived from timestamp, sender/receiver account type and event-time balance snapshots.
 
-`MODEL_EXCLUDED_FIELDS` explicitly excludes transaction IDs, account IDs, fraud/AML labels and scenario metadata. Model training must use the allowlist and must never use target labels or scenario descriptions as input features.
+`MODEL_EXCLUDED_FIELDS` excludes transaction IDs, account IDs, fraud/AML labels and scenario metadata. Future training code must use the allowlist and must never pass labels or scenario descriptions as input features.
 
-Evaluation must use time-based holdouts and additional account/scenario holdouts. A random row split alone can put related transactions from the same synthetic pattern into both training and test sets.
+Use time-based holdouts plus account/scenario holdouts. A random row split alone can put related events from the same generated pattern into both training and test sets.
 
-## 5. Data quality checks
+## 5. Data-quality audit
 
-`audit_ledger()` checks unique transaction IDs, canonical account references, no self-transfers, timezone-aware timestamps, consistency between labels and scenario metadata, required balance snapshots, no overdrafts and correct balance arithmetic. It reports the four label-combination counts.
+`audit_ledger()` checks unique transaction IDs, canonical account references, self-transfers, timezone-aware timestamps, label/metadata consistency, required balance snapshots, overdrafts and balance arithmetic. It reports all four label-combination counts.
 
-Passing these checks proves internal generator consistency only. It does not prove real-world representativeness, fairness or production model accuracy.
+These checks validate internal consistency only. They do not prove real-world representativeness, fairness or production model accuracy.
 
 ## 6. Complete source and test code
 
-Code below is copied from the committed files so each file's purpose and implementation are documented.
+The code below is copied from the committed source files. Each listing is the implementation referenced by this task.
 ### backend/app/services/registry.py
 
 **Purpose:** Creates stable canonical customer/account IDs and deterministic synthetic opening balances.
@@ -224,7 +220,7 @@ class Transaction(BaseModel):
 
 ### backend/app/services/transaction_generator.py
 
-**Purpose:** Generates normal activity, fraud scenarios and AML network patterns into one reproducible, timestamp-mixed ledger.
+**Purpose:** Generates normal activity, legitimate network hard negatives, fraud scenarios and AML network patterns into one reproducible ledger.
 
 ```python
 """Deterministic, shared synthetic transaction generation for Sentinel.
@@ -404,10 +400,33 @@ def generate_transactions(
     events: list[_Event] = []
 
     # Normal activity: profile-influenced amounts, channels and active hours.
-    # Eight percent are legitimate high-value hard negatives by design.
-    for _index in range(normal_count):
-        sender, receiver = rng.sample(accounts, 2)
-        profile = profiles[sender.account_id]
+    # High-value and legitimate fan-in/fan-out lookalikes are hard negatives.
+    normal_hub: str | None = None
+    normal_group_time: datetime | None = None
+    normal_group_is_fan_in = True
+    for index in range(normal_count):
+        group_offset = index % 20
+        if group_offset < 3:
+            if group_offset == 0:
+                normal_hub = rng.choice(account_ids)
+                normal_group_time = base_time + timedelta(
+                    days=rng.randrange(30), hours=rng.randrange(24), minutes=rng.randrange(60)
+                )
+                normal_group_is_fan_in = (index // 20) % 2 == 0
+            assert normal_hub is not None and normal_group_time is not None
+            other = rng.choice([item for item in account_ids if item != normal_hub])
+            if normal_group_is_fan_in:
+                sender_id, receiver_id = other, normal_hub
+            else:
+                sender_id, receiver_id = normal_hub, other
+                        profile = profiles[sender_id]
+            timestamp = normal_group_time + timedelta(minutes=group_offset)
+        else:
+            sender, receiver = rng.sample(accounts, 2)
+            sender_id, receiver_id = sender.account_id, receiver.account_id
+            profile = profiles[sender_id]
+            timestamp = _timestamp(base_time, rng, profile)
+
         if rng.random() < 0.08:
             amount = Decimal(rng.randrange(50_000, 350_001))
         else:
@@ -415,10 +434,10 @@ def generate_transactions(
             amount = Decimal(str(min(200_000, max(100, round(sampled)))))
         events.append(
             _event(
-                sender.account_id,
-                receiver.account_id,
+                sender_id,
+                receiver_id,
                 amount,
-                _timestamp(base_time, rng, profile),
+                timestamp,
                 rng,
                 channels=profile.channels,
             )
@@ -675,7 +694,7 @@ def audit_ledger(
 
 ### backend/tests/test_transaction_generator.py
 
-**Purpose:** Tests generation counts, shared account references, deterministic IDs, label overlap, timestamps, balance snapshots and AML typology coverage.
+**Purpose:** Tests generator counts, canonical account references, reproducibility, independent labels, balance snapshots, AML typologies and normal network hard negatives.
 
 ```python
 from app.services.registry import build_registry
@@ -778,11 +797,22 @@ def test_generator_rejects_invalid_counts_and_small_registry() -> None:
     with __import__("pytest").raises(ValueError, match="at least two accounts"):
         generate_transactions(small_registry)
 
+def test_normal_activity_includes_legitimate_fan_in_hard_negative() -> None:
+    registry = build_registry(customer_count=12, seed=17)
+    transactions = generate_transactions(
+        registry, normal_count=3, fraud_count=0, aml_count=0, seed=18
+    )
+
+    assert len(transactions) == 3
+    assert all(not item.is_fraud and not item.is_aml_suspicious for item in transactions)
+    assert len({item.receiver_account_id for item in transactions}) == 1
+    assert len({item.timestamp.date() for item in transactions}) == 1
+
 ```
 
 ### backend/tests/test_data_quality.py
 
-**Purpose:** Tests all four label combinations, metadata consistency and the explicit feature/exclusion lists.
+**Purpose:** Tests all four label combinations, metadata consistency and explicit feature/exclusion lists.
 
 ```python
 import pytest
@@ -842,16 +872,17 @@ def test_feature_allowlist_and_exclusions_are_explicit() -> None:
 ```
 ## 7. Verification status
 
-- Generator and data-quality tests have been added or updated.
-- Tests have **not** been executed in the user's local environment during this implementation session.
+- Generator and data-quality tests are committed.
+- They have **not** been executed in the user's local environment during this implementation session.
 - Run `python -m pytest` from `backend/` and share the complete output before marking this redesign verified.
-- PostgreSQL schema changes also require the additive migration described in Task 04 before using an existing database.
+- Existing PostgreSQL databases need the additive schema migration documented in Task 04.
 
 ## 8. Limitations
 
-- All customer behavior and labels are synthetic; they are not sourced from real bank activity.
-- The 8% legitimate high-value rate and default one-row overlap are design parameters, not empirical estimates.
-- The current normal activity generator models transfer amount/channel/time behavior; it does not yet create explicit salary, utility, merchant, cash, card or loan event types.
-- Account takeover and beneficiary-burst patterns are proxies; login/device and beneficiary-history data are not present.
-- No evidence from this dataset can prove the absence of all bias or establish real-bank model accuracy.
+- All customer behavior and labels are synthetic, not sourced from real bank activity.
+- The 8% expected high-value hard-negative rate and default one-row overlap are design parameters, not empirical estimates.
+- The current generator models transfers only; it does not yet create explicit salary, utility, merchant, cash, card or loan event types.
+- Login/device signals and historical beneficiary relationships are not generated.
+- Legitimate fan-in/fan-out lookalikes are included, but a broader library of legitimate graph motifs and behavior segments remains future work.
+- Synthetic results cannot prove absence of all bias or real-bank detection accuracy.
 - Continuous generation, a Synthetic Banking API, Kafka publishing and model training are separate future tasks.
