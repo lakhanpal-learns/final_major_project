@@ -115,7 +115,7 @@ New tests cover:
 - Custom rate configuration.
 - Invalid rate values.
 
-Expected total after adding these tests is 29 tests, assuming the previous 23 tests remain unchanged. This is an expected collection count, not a claimed test result.
+Expected total after adding these tests is 31 tests, assuming the previous 23 tests remain unchanged. This is an expected collection count, not a claimed test result.
 
 ---
 
