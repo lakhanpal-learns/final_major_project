@@ -6,6 +6,7 @@ from sqlalchemy.orm import Session
 from app.db.database import create_db_engine, create_schema, create_session_factory
 from app.db.repository import save_registry, save_transactions
 from app.db.tables import AccountRow, CustomerRow, TransactionRow
+from app.services.data_quality import audit_ledger
 from app.services.registry import build_registry
 from app.services.transaction_generator import generate_transactions
 
@@ -39,6 +40,7 @@ def seed_database(
         aml_count=aml_count,
         seed=transaction_seed,
     )
+    audit_ledger(registry, transactions)
 
     try:
         save_registry(session, registry)
