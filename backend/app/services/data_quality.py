@@ -7,8 +7,21 @@ from app.models.transaction import Transaction
 from app.services.registry import BankingRegistry
 
 
-# These fields are labels, identifiers, or scenario metadata. Do not pass them
-# directly into model training features.
+# Candidate fields for future model features. Derived hour/day fields and
+# account types must be materialized by feature engineering, not read as labels.
+MODEL_FEATURE_ALLOWLIST = (
+    "amount",
+    "channel",
+    "transaction_type",
+    "hour_of_day",
+    "day_of_week",
+    "sender_account_type",
+    "receiver_account_type",
+    "sender_balance_before",
+    "receiver_balance_before",
+)
+
+# Never pass identifiers, ground-truth labels, or scenario metadata to a model.
 MODEL_EXCLUDED_FIELDS = (
     "transaction_id",
     "sender_account_id",
@@ -32,8 +45,10 @@ def audit_ledger(
     account_ids = {account.account_id for account in registry.accounts}
     seen_ids: set[str] = set()
     label_counts: Counter[str] = Counter()
+    total = 0
 
     for transaction in transactions:
+        total += 1
         if transaction.transaction_id in seen_ids:
             raise ValueError(f"duplicate transaction ID: {transaction.transaction_id}")
         seen_ids.add(transaction.transaction_id)
@@ -52,18 +67,18 @@ def audit_ledger(
         if transaction.is_aml_suspicious != (transaction.aml_typology is not None):
             raise ValueError("AML label and AML typology metadata are inconsistent")
 
-        snapshots = (
-            transaction.sender_balance_before,
-            transaction.sender_balance_after,
-            transaction.receiver_balance_before,
-            transaction.receiver_balance_after,
-        )
-        if any(value is None for value in snapshots):
+        sender_before = transaction.sender_balance_before
+        sender_after = transaction.sender_balance_after
+        receiver_before = transaction.receiver_balance_before
+        receiver_after = transaction.receiver_balance_after
+        if any(value is None for value in (
+            sender_before, sender_after, receiver_before, receiver_after
+        )):
             raise ValueError("generated transactions must include balance snapshots")
-
-        sender_before, sender_after, receiver_before, receiver_after = snapshots
-        assert sender_before is not None and sender_after is not None
-        assert receiver_before is not None and receiver_after is not None
+        if sender_before is None or sender_after is None:
+            raise ValueError("sender balance snapshots are required")
+        if receiver_before is None or receiver_after is None:
+            raise ValueError("receiver balance snapshots are required")
         if sender_before < transaction.amount:
             raise ValueError("transaction overdraws the sender account")
         if sender_before - transaction.amount != sender_after:
@@ -77,7 +92,7 @@ def audit_ledger(
         label_counts[label_key] += 1
 
     return {
-        "transaction_count": len(seen_ids),
+        "transaction_count": total,
         "normal_only": label_counts["fraud_0_aml_0"],
         "fraud_only": label_counts["fraud_1_aml_0"],
         "aml_only": label_counts["fraud_0_aml_1"],

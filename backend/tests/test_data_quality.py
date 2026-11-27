@@ -1,6 +1,10 @@
 import pytest
 
-from app.services.data_quality import MODEL_EXCLUDED_FIELDS, audit_ledger
+from app.services.data_quality import (
+    MODEL_EXCLUDED_FIELDS,
+    MODEL_FEATURE_ALLOWLIST,
+    audit_ledger,
+)
 from app.services.registry import build_registry
 from app.services.transaction_generator import generate_transactions
 
@@ -28,13 +32,20 @@ def test_audit_reports_all_four_independent_label_combinations() -> None:
 def test_audit_rejects_inconsistent_label_metadata() -> None:
     registry = build_registry(customer_count=10)
     transactions = generate_transactions(registry, 5, 3, 3, seed=103)
-    corrupted = transactions[0].model_copy(update={"fraud_scenario": "FALSE_METADATA"})
+    normal_event = next(item for item in transactions if not item.is_fraud)
+    corrupted = normal_event.model_copy(update={"fraud_scenario": "FALSE_METADATA"})
+    altered = [
+        corrupted if item.transaction_id == normal_event.transaction_id else item
+        for item in transactions
+    ]
 
     with pytest.raises(ValueError, match="fraud label"):
-        audit_ledger(registry, [corrupted, *transactions[1:]])
+        audit_ledger(registry, altered)
 
 
-def test_model_excluded_fields_contain_labels_and_identifiers() -> None:
+def test_feature_allowlist_and_exclusions_are_explicit() -> None:
+    assert "amount" in MODEL_FEATURE_ALLOWLIST
+    assert "channel" in MODEL_FEATURE_ALLOWLIST
     assert "is_fraud" in MODEL_EXCLUDED_FIELDS
     assert "is_aml_suspicious" in MODEL_EXCLUDED_FIELDS
     assert "transaction_id" in MODEL_EXCLUDED_FIELDS
