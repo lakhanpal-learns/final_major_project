@@ -19,7 +19,7 @@ from app.db.tables import (
 )
 from app.models.events import TransactionCreatedEvent
 from app.services.fraud_event_consumer import process_fraud_message, run_fraud_consumer
-from app.services.fraud_features import FEATURE_COLUMNS
+from app.services.fraud_features import FEATURE_COLUMNS, build_fraud_feature_rows
 from app.services.fraud_inference_service import (
     FraudInferenceService,
     build_online_fraud_features,
@@ -167,6 +167,50 @@ def test_online_features_match_feature_contract_and_exclude_labels(session_facto
     assert "is_aml_suspicious" not in features
     assert "fraud_scenario" not in features
     assert "aml_typology" not in features
+
+    records = [
+        {
+            "transaction_id": "TXN-PRIOR-001",
+            "sender_account_id": "ACC00000001",
+            "receiver_account_id": "ACC00000003",
+            "amount": Decimal("50.00"),
+            "currency": "INR",
+            "transaction_type": "TRANSFER",
+            "channel": "UPI",
+            "timestamp": datetime.fromisoformat(payload["transaction"]["timestamp"]) - timedelta(minutes=8),
+            "sender_account_type": "SAVINGS",
+            "receiver_account_type": "SAVINGS",
+            "is_fraud": False,
+        },
+        {
+            "transaction_id": "TXN-PRIOR-IN-001",
+            "sender_account_id": "ACC00000003",
+            "receiver_account_id": "ACC00000002",
+            "amount": Decimal("25.00"),
+            "currency": "INR",
+            "transaction_type": "TRANSFER",
+            "channel": "NEFT",
+            "timestamp": datetime.fromisoformat(payload["transaction"]["timestamp"]) - timedelta(minutes=4),
+            "sender_account_type": "SAVINGS",
+            "receiver_account_type": "CURRENT",
+            "is_fraud": False,
+        },
+        {
+            "transaction_id": "TXN-CURRENT-001",
+            "sender_account_id": "ACC00000001",
+            "receiver_account_id": "ACC00000002",
+            "amount": Decimal("125.50"),
+            "currency": "INR",
+            "transaction_type": "TRANSFER",
+            "channel": "UPI",
+            "timestamp": datetime.fromisoformat(payload["transaction"]["timestamp"]),
+            "sender_account_type": "SAVINGS",
+            "receiver_account_type": "CURRENT",
+            "is_fraud": True,
+        },
+    ]
+    offline_current = build_fraud_feature_rows(records)[-1]
+    assert features == {column: offline_current[column] for column in FEATURE_COLUMNS}
 
 
 def test_consumer_persists_prediction_with_inbox_atomically(session_factory):
