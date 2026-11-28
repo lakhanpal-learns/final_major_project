@@ -19,6 +19,12 @@ Provide a larger, reproducible synthetic cohort for offline experiments without 
 
 Fraud and AML counts are positive-label counts. By default, one AML transaction is also fraud-labelled, so the four label combinations are not simply added together: 20,000 normal-only + 999 fraud-only + 999 AML-only + 1 fraud-and-AML = 21,999? **No**: because the generator's `normal_count` is normal-only and the fraud/AML positive counts include the overlap, the total is `normal_count + fraud_count + aml_count - overlap_count` = 21,999. The generator's current default overlap is one. Check the metadata for the actual total and class counts.
 
+## Scenario variation added
+
+The fraud generator now uses six rule families: high-value behavioural deviation, rapid repeated transfers, unusual time/channel activity, multi-recipient bursts, low-value high-velocity bursts and repeated-beneficiary bursts. Fraud group sizes vary from two to six transactions (subject to the requested remainder). AML groups vary from three to six edges while cycling through the five existing typologies. Normal activity retains account-type profiles, lognormal-like amount variation, high-value legitimate hard negatives and legitimate fan-in/fan-out lookalikes.
+
+These are deliberately designed synthetic patterns. Their variety does not prove that they cover the range of real bank fraud or AML behaviour.
+
 ## Files
 
 | File | Purpose |
