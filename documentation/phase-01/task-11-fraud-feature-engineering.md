@@ -56,10 +56,7 @@ The current feature set uses event attributes, account categories, and strictly 
 
 ## 5. Chronological partitions
 
-Rows are ordered by event timestamp and transaction ID, then assigned:
-- First 70%: training.
-- Next 15%: validation.
-- Final 15%: test.
+Rows are ordered by event timestamp and transaction ID, then assigned to approximately 70/15/15 training, validation and test partitions. Events with the same UTC timestamp are an indivisible group and can never be split across partitions. The whole group is assigned according to its midpoint relative to the nominal partition boundaries, so actual row counts can differ slightly from exact percentages.
 
 Historical features for later partitions can use earlier transactions from the same seed cohort. This reflects the information available at the later event time and does not expose future records. No random shuffle is applied.
 
@@ -116,7 +113,7 @@ Run the full test suite from the repository root:
 python -m pytest
 ```
 
-SQLite-backed tests validate query semantics, feature calculations, split assignment, schema validation and file export. They do not prove the live PostgreSQL dataset has a particular row count; run the CLI against the local PostgreSQL database to verify that environment.
+SQLite-backed tests validate query semantics, feature calculations, timestamp-group-safe chronological split assignment, schema validation and file export. They do not prove the live PostgreSQL dataset has a particular row count; run the CLI against the local PostgreSQL database to verify that environment.
 
 ## 10. Limitations and next task
 
