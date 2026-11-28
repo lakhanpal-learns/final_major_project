@@ -1,7 +1,7 @@
 # Sentinel — High-Level Architecture and Python File Flow
 
 **Document type:** HLD + implementation flow reference  
-**Status:** Current implementation mapped; future components explicitly marked as planned  
+**Status:** Current implementation mapped through Task 11; future components explicitly marked as planned  
 **Project:** Sentinel — Unified Banking Fraud Detection and Anti-Money Laundering Investigation System
 
 This document answers two questions:
@@ -9,7 +9,7 @@ This document answers two questions:
 1. **HLD:** What are the major system components and how do they connect?
 2. **Code/process flow:** When an event moves from one component to the next, which Python file is responsible, and what happens there?
 
-> **Accuracy rule:** Solid/current sections describe files and behavior already implemented in the repository as of Task 10. Components marked **PLANNED** are part of the approved target architecture but must not be treated as implemented.
+> **Accuracy rule:** Solid/current sections describe files and behavior already implemented in the repository as of Task 11. Components marked **PLANNED** are part of the approved target architecture but must not be treated as implemented.
 
 ---
 
@@ -58,7 +58,9 @@ flowchart TD
     KAFKA --> LAKE
 
     FINBOX[("PostgreSQL<br/>Fraud event inbox")]
-    MODEL["Fraud feature pipeline +<br/>model inference<br/>PLANNED"]
+    OFFLINE["Offline fraud dataset preparation<br/>Task 11 — IMPLEMENTED"]
+    TRAIN["Random Forest training + evaluation<br/>Task 12 — PLANNED"]
+    MODEL["Online fraud event features +<br/>model inference<br/>PLANNED"]
     FRESULT[("Fraud predictions + alerts<br/>PLANNED")]
     AENGINE["AML account/network state +<br/>typology analysis<br/>PLANNED"]
     ARESULT[("AML findings + alerts<br/>PLANNED")]
@@ -85,7 +87,8 @@ flowchart TD
     classDef implemented fill:#e8f5e9,stroke:#388e3c,color:#1b5e20
     classDef planned fill:#fff8e1,stroke:#f9a825,color:#5d4037
     class REG,GEN,LEDGER,OUTBOX,PUB,KAFKA,FRAUD,FINBOX,API implemented
-    class AML,LAKE,MODEL,FRESULT,AENGINE,ARESULT,BRONZE,SILVER,GOLD,UI planned
+    class OFFLINE implemented
+    class AML,LAKE,TRAIN,MODEL,FRESULT,AENGINE,ARESULT,BRONZE,SILVER,GOLD,UI planned
 ```
 
 **Diagram legend:** Green = implemented by the current project stage; yellow = planned target component. The diagram is a system-level view, not a claim that every arrow is already running in the application.
@@ -101,7 +104,9 @@ flowchart TD
 | Outbox publisher | Publishes pending outbox events to Kafka and records acknowledgement | Implemented |
 | Kafka topic | Transports versioned transaction events | Implemented |
 | Fraud consumer | Validates events and persists them in a fraud-specific inbox | Implemented |
-| Fraud model and alerts | Builds features, scores events and stores predictions/alerts | Planned — next fraud pipeline work |
+| Offline fraud dataset preparation | Extracts the labelled seed cohort, builds point-in-time features and exports chronological partitions | Implemented — Task 11 |
+| Fraud model training and online inference | Trains the Random Forest and later scores live fraud events | Planned — Task 12 and subsequent inference work |
+| Fraud alerts | Stores and exposes actionable fraud findings | Planned |
 | AML consumer and analysis | Maintains account/network state and evaluates AML typologies | Planned |
 | Data lake | Bronze, Silver and Gold analytical datasets | Planned |
 | Dashboard and investigation UI | Presents ledger views, findings and cases | Planned / not covered by Tasks 1–10 |
@@ -126,16 +131,19 @@ flowchart TD
     J["10. Parse and validate event<br/><b>backend/app/models/events.py</b><br/>Strict versioned event schema"]
     K["11. Fraud ingestion logic<br/><b>backend/app/services/fraud_event_consumer.py</b><br/>Validates, deduplicates, quarantines and commits offsets after DB persistence"]
     L[("12. PostgreSQL fraud inbox<br/><b>fraud_event_inbox</b><br/>Durable record of accepted fraud-stream events")]
-    M["13. Fraud feature engineering + model inference<br/><b>PLANNED — file/module not created yet</b><br/>Build approved features and score the transaction"]
+    M["13. Online fraud event features + model inference<br/><b>PLANNED — not implemented</b><br/>Score the incoming transaction using the trained model"]
+    O["Offline fraud dataset preparation<br/><b>backend/app/prepare_fraud_dataset.py</b><br/>Task 11: historical features + chronological CSV export"]
+    P[("fraud_dataset.csv + metadata JSON<br/>IMPLEMENTED — Task 11")]
+    Q["Random Forest training + evaluation<br/><b>PLANNED — Task 12</b>"]
     N[("14. Fraud predictions and alerts<br/><b>PLANNED — database tables not created yet</b>")]
 
     A --> B --> C --> D --> E
-    E --> F --> G --> H --> I --> J --> K --> L --> M --> N
+    E --> F --> G --> H --> I --> J --> K --> L --> M --> N\n    E --> O --> P --> Q
 
     classDef implemented fill:#e8f5e9,stroke:#388e3c,color:#1b5e20
     classDef planned fill:#fff8e1,stroke:#f9a825,color:#5d4037
     class A,B,C,D,E,F,G,H,I,J,K,L implemented
-    class M,N planned
+    class O,P implemented\n    class M,N,Q planned
 ```
 
 ### 3.1 File-by-file responsibility
@@ -155,7 +163,9 @@ flowchart TD
 | 10 | `backend/app/models/events.py` | Defines and validates the strict Pydantic event schema. |
 | 11 | `backend/app/services/fraud_event_consumer.py` | Processes Kafka records, stores valid events in the fraud inbox, quarantines invalid records, deduplicates event IDs and commits offsets only after durable database work. |
 | 12 | PostgreSQL `fraud_event_inbox` | Stores accepted event payloads for the fraud pipeline. This is ingestion storage, not a fraud prediction. |
-| 13–14 | Not created yet | Fraud feature engineering, model inference, prediction history and alert creation are future work. Do not assume these modules/tables already exist. |
+| 13 | `backend/app/prepare_fraud_dataset.py` | Offline Task 11 runner: extracts the labelled seed cohort, creates leakage-controlled point-in-time features, assigns chronological splits and writes CSV/JSON artifacts. |
+| 14 | `backend/app/services/fraud_features.py`, `fraud_dataset.py`, `fraud_dataset_validation.py` | Implements the offline fraud feature and dataset preparation path. It does not score Kafka events. |
+| 15 | Not created yet | Random Forest training, online event inference, prediction history and alert creation remain future work (Task 12 onward). |
 
 ---
 
@@ -173,9 +183,9 @@ The publisher reads unpublished outbox rows and sends each event to Kafka. It ma
 
 The fraud consumer validates the message against the versioned schema. It persists a valid event or a durable rejection record before committing the Kafka offset. If database persistence fails, it must not commit that record's offset.
 
-### 4.4 Fraud inbox → model inference (next implementation stage)
+### 4.4 Fraud inbox → online model inference (future implementation stage)
 
-The inbox is the boundary currently reached by Task 10. The next stage must:
+The Kafka consumer currently persists accepted events in the inbox. Task 11 separately implements offline historical feature engineering from the labelled seed cohort. The live inbox-to-model path is still not implemented. The next online stage must:
 1. Load the accepted event and retrieve permitted account context.
 2. Build model features from an explicit allowlist.
 3. Exclude event IDs, customer/account identifiers where inappropriate, fraud/AML labels, scenario names and generator-only metadata from model inputs.
@@ -214,7 +224,7 @@ A separate group ID allows each consumer group to read its own copy of the topic
 
 ## 6. Evidence and current implementation boundary
 
-As of the completion of Task 10:
+As of the completion of Task 11:
 
 - The project test suite was reported by the user as **50 passed**.
 - The PostgreSQL schema update completed successfully.
@@ -222,7 +232,7 @@ As of the completion of Task 10:
 - The consumer logged `Fraud event ingestion: stored`.
 - A PostgreSQL query confirmed event `22290321-491b-4a52-9849-5765905276d8` for transaction `e5139fba38fc4f0dbfbc2e0a3c958a3d` in `fraud_event_inbox`.
 
-This is evidence of one successful local outbox → Kafka → fraud consumer → PostgreSQL inbox path. It is not evidence of fraud model accuracy, production throughput, high availability, crash recovery under all failure timings, or production reliability.
+Task 11 adds an offline dataset preparation path, but no local CLI run or test-suite result has yet been recorded in this document. The Task 10 evidence remains one successful local outbox → Kafka → fraud consumer → PostgreSQL inbox path. Neither this ingestion check nor the existence of a prepared synthetic dataset proves fraud model accuracy, production throughput, high availability, crash recovery under all failure timings, or production reliability.
 
 ---
 
