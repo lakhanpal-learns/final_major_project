@@ -1,9 +1,9 @@
-"""Relational table mappings for the canonical banking ledger."""
+"""Relational table mappings for the canonical banking ledger and event outbox."""
 
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Numeric, String
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -58,3 +58,21 @@ class TransactionRow(Base):
     is_aml_suspicious: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     fraud_scenario: Mapped[str | None] = mapped_column(String(80), nullable=True)
     aml_typology: Mapped[str | None] = mapped_column(String(80), nullable=True)
+
+
+class OutboxEventRow(Base):
+    """Durable event awaiting publication to downstream messaging infrastructure."""
+
+    __tablename__ = "outbox_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
