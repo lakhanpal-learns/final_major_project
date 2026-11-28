@@ -92,7 +92,7 @@ SQLite-based unit tests do not prove PostgreSQL row-lock behavior. Local Docker 
 
 ## 8. Initial implementation added (2026-11-28)
 
-The first implementation is now committed. It is code-complete enough for local testing, but it is **not yet runtime-verified**.
+The implementation is committed and has passed the user's local automated and PostgreSQL/Kafka integration checks described in Section 9.
 
 ### Files added or changed
 
@@ -126,9 +126,88 @@ python -m app.publish_outbox
 
 Stop the publisher with Ctrl+C. Run the API and the publisher in separate terminals. Do not start multiple publisher processes until the PostgreSQL integration check is complete.
 
-### Current verification status
+### Verification status
 
-- Source files and unit tests have been added to the repository.
-- Automated test results have not yet been reported by the user.
-- Real PostgreSQL-to-Kafka publication and consumption have not yet been verified.
-- Do not mark Task 09 complete until the test suite passes and a real event is observed in Kafka.
+The implementation and the local end-to-end path have been verified as described below. See the evidence boundaries in Section 9; these checks do not establish production reliability or throughput.
+
+
+## 9. Local verification results (2026-11-28)
+
+The user ran the following from the project root after pulling the implementation:
+
+```powershell
+python -m pytest
+```
+
+Reported result: **40 passed**.
+
+The publisher was then started from the `backend` directory with:
+
+```powershell
+$env:KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+$env:KAFKA_TRANSACTION_TOPIC = "bank.transactions.v1"
+python -m app.publish_outbox
+```
+
+The publisher log included:
+
+```text
+Outbox batch: {'selected': 1, 'published': 1, 'failed': 0}
+```
+
+A direct PostgreSQL query of the latest outbox row returned:
+
+```text
+event_id:     22290321-491b-4a52-9849-5765905276d8
+aggregate_id: e5139fba38fc4f0dbfbc2e0a3c958a3d
+published_at: 2026-11-28 06:59:51.172009+00:00
+attempts:     0
+last_error:   None
+```
+
+The user then read the Kafka topic using the console consumer:
+
+```powershell
+docker exec sentinel-kafka /opt/kafka/bin/kafka-console-consumer.sh --bootstrap-server localhost:9092 --topic bank.transactions.v1 --from-beginning --max-messages 1
+```
+
+Kafka returned one message with the same event ID and transaction ID:
+
+```json
+{
+  "event_id": "22290321-491b-4a52-9849-5765905276d8",
+  "event_type": "bank.transaction.created.v1",
+  "event_version": 1,
+  "transaction": {
+    "transaction_id": "e5139fba38fc4f0dbfbc2e0a3c958a3d",
+    "sender_account_id": "ACC00000001",
+    "receiver_account_id": "ACC00000002",
+    "amount": "1.00",
+    "currency": "INR",
+    "transaction_type": "TRANSFER",
+    "channel": "UPI",
+    "status": "COMPLETED"
+  }
+}
+```
+
+### What this proves
+
+- The reported automated suite passed: 40 tests.
+- The publisher connected to the local Kafka broker and received a successful acknowledgement for one pending event.
+- The corresponding PostgreSQL outbox row was marked published, with zero attempts and no recorded error.
+- A Kafka console consumer independently read the event from `bank.transactions.v1`.
+- The matching event and transaction IDs establish that the observed Kafka message corresponds to the inspected PostgreSQL outbox row.
+
+This is a successful **single-event local end-to-end integration check** of PostgreSQL outbox → publisher → Kafka → consumer read.
+
+### Evidence boundaries
+
+This test does not prove:
+- crash recovery in the acknowledgement-before-database-commit failure window;
+- duplicate delivery and downstream idempotency;
+- PostgreSQL `SKIP LOCKED` behavior under concurrent publisher processes;
+- sustained throughput, latency, or load capacity;
+- production security, high availability, or operational reliability.
+
+The Kafka console consumer check proves that the event was readable from the topic; it is not a test of the future fraud, AML, or data-lake consumer implementations.
