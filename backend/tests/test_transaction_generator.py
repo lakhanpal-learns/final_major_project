@@ -120,3 +120,46 @@ def test_fraud_generation_supports_two_account_registry() -> None:
     assert len(transactions) == 7
     assert sum(item.is_fraud for item in transactions) == 5
     assert all(item.sender_account_id != item.receiver_account_id for item in transactions)
+
+
+
+def test_fraud_generator_covers_six_scenario_families() -> None:
+    registry = build_registry(customer_count=100, seed=51)
+    transactions = generate_transactions(
+        registry,
+        normal_count=0,
+        fraud_count=120,
+        aml_count=0,
+        seed=52,
+    )
+
+    scenarios = {item.fraud_scenario for item in transactions if item.is_fraud}
+    assert {
+        "HIGH_VALUE_BEHAVIORAL_DEVIATION",
+        "RAPID_REPEATED_TRANSFERS",
+        "UNUSUAL_TIME_CHANNEL_ACTIVITY",
+        "MULTI_RECIPIENT_BURST",
+        "LOW_VALUE_HIGH_VELOCITY",
+        "REPEATED_BENEFICIARY_BURST",
+    }.issubset(scenarios)
+
+
+def test_repeated_beneficiary_fraud_scenario_reuses_a_recipient() -> None:
+    registry = build_registry(customer_count=100, seed=61)
+    transactions = generate_transactions(
+        registry,
+        normal_count=0,
+        fraud_count=120,
+        aml_count=0,
+        seed=62,
+    )
+
+    repeated_senders = {}
+    for item in transactions:
+        if item.fraud_scenario == "REPEATED_BENEFICIARY_BURST":
+            repeated_senders.setdefault(item.sender_account_id, []).append(
+                item.receiver_account_id
+            )
+
+    assert any(len(set(recipients)) == 1 and len(recipients) >= 2
+               for recipients in repeated_senders.values())
