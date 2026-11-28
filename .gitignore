@@ -25,3 +25,5 @@ Thumbs.db
 htmlcov/
 
 pytest.ini 
+# Generated offline ML datasets and metadata
+/backend/data/processed/fraud/
