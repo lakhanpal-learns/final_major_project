@@ -16,7 +16,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.tables import AMLEventInboxRow, AMLFindingRow, TransactionRow
 from app.models.events import TransactionCreatedEvent
-from app.services.aml_rules import evaluate_aml_event, persist_aml_findings
+from app.services.aml_rules import RULE_VERSION, evaluate_aml_event, persist_aml_findings
 
 DEFAULT_TOPIC = "bank.transactions.v1"
 DEFAULT_GROUP_ID = "aml-monitor-v1"
@@ -40,7 +40,9 @@ def process_aml_message(session_factory: sessionmaker, *, value: bytes | str) ->
                 raise ValueError("AML event_id collision with different payload")
             # Recovery path for an inbox row committed without findings.
             has_findings = session.scalar(select(AMLFindingRow.finding_id).where(
-                AMLFindingRow.transaction_id == event.transaction.transaction_id).limit(1))
+                AMLFindingRow.transaction_id == event.transaction.transaction_id,
+                AMLFindingRow.rule_version == RULE_VERSION,
+            ).limit(1))
             if has_findings is not None:
                 return "duplicate"
         else:
