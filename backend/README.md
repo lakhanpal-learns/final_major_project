@@ -47,3 +47,15 @@ Run this in another terminal while PostgreSQL and Kafka are healthy. The consume
 The first run uses `auto_offset_reset=earliest` for this new consumer group, so it will read existing retained events. It validates the v1 event contract and stores valid events in `fraud_event_inbox`. Invalid messages are durably quarantined in `fraud_event_rejections`. Kafka offsets are manually committed only after the corresponding database write completes.
 
 This task implements durable event ingestion only. It does not perform fraud model inference, create fraud predictions, or generate fraud alerts. Stop the consumer with Ctrl+C.
+
+
+## Prepare the offline fraud dataset (Task 11)
+
+Ensure PostgreSQL is running and the initial synthetic banking dataset has been seeded. From the repository root:
+
+    cd backend
+    python -m app.prepare_fraud_dataset
+
+This creates `data/processed/fraud/fraud_dataset.csv` and `fraud_dataset_metadata.json` under the backend directory. The prepared cohort excludes live simulator transactions identified by their matching transactional-outbox rows. The CSV contains leakage-controlled features, the `is_fraud` target, and a chronological train/validation/test partition. The JSON file records class counts and any split warnings.
+
+This command prepares data only. It does not train a model or run inference. See `documentation/phase-01/task-11-fraud-feature-engineering.md` for the feature definitions, cohort rule and limitations.
