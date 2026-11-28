@@ -187,6 +187,10 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
     # and amounts remain within a bounded transfer ratio.
     path = _ordered_path(prior, receiver, sender)
     if path:
+        closing_ratio = amount / Decimal(path[-1].amount)
+        if not CYCLE_MIN_RATIO <= closing_ratio <= CYCLE_MAX_RATIO:
+            path = None
+    if path:
         path_accounts = {path[0].sender_account_id}
         for row in path:
             path_accounts.add(row.receiver_account_id)
