@@ -74,6 +74,8 @@ def test_rollback_reverts_balances_transaction_and_outbox_together(session_facto
             select(AccountRow).order_by(AccountRow.account_id)
         ).all()
         sender, receiver = accounts[0], accounts[1]
+        sender_id = sender.account_id
+        receiver_id = receiver.account_id
         sender_before = Decimal(sender.balance)
         receiver_before = Decimal(receiver.balance)
         transaction_id = "TXNROLLBACK00000000000001"
@@ -81,8 +83,8 @@ def test_rollback_reverts_balances_transaction_and_outbox_together(session_facto
         persist_live_transfer(
             session,
             transaction_id=transaction_id,
-            sender_account_id=sender.account_id,
-            receiver_account_id=receiver.account_id,
+            sender_account_id=sender_id,
+            receiver_account_id=receiver_id,
             amount=Decimal("1.00"),
             timestamp=datetime.now(timezone.utc),
             channel="UPI",
@@ -94,6 +96,6 @@ def test_rollback_reverts_balances_transaction_and_outbox_together(session_facto
         assert session.scalars(
             select(OutboxEventRow).where(OutboxEventRow.aggregate_id == transaction_id)
         ).all() == []
-        assert Decimal(session.get(AccountRow, sender.account_id).balance) == sender_before
-        assert Decimal(session.get(AccountRow, receiver.account_id).balance) == receiver_before
+        assert Decimal(session.get(AccountRow, sender_id).balance) == sender_before
+        assert Decimal(session.get(AccountRow, receiver_id).balance) == receiver_before
 
