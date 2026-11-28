@@ -2,6 +2,7 @@
 
 import math
 from collections import Counter
+from datetime import datetime, timezone
 from typing import Sequence
 
 from app.services.fraud_features import FEATURE_COLUMNS, TARGET_COLUMN
@@ -12,22 +13,58 @@ SPLIT_NAMES = ("train", "validation", "test")
 EXPECTED_COLUMNS = set(FEATURE_COLUMNS) | {TARGET_COLUMN, SPLIT_COLUMN}
 
 
-def assign_chronological_splits(rows: Sequence[dict]) -> list[dict]:
-    """Assign ordered rows to 70/15/15 train/validation/test partitions."""
+def assign_chronological_splits(
+    rows: Sequence[dict],
+    timestamps: Sequence[datetime] | None = None,
+) -> list[dict]:
+    """Split chronologically without separating events at an identical timestamp.
+
+    Timestamps must align with the already ordered rows. If omitted, each row
+    is treated as an independent time group for timestamp-free callers.
+    """
     if len(rows) < 3:
         raise ValueError("At least three transactions are required for chronological splitting.")
+    if timestamps is not None and len(timestamps) != len(rows):
+        raise ValueError("Timestamp count must match the number of dataset rows.")
 
     total = len(rows)
     train_end = max(1, int(total * 0.70))
     validation_end = max(train_end + 1, int(total * 0.85))
     validation_end = min(validation_end, total - 1)
 
-    result = []
-    for index, row in enumerate(rows):
-        split = "train" if index < train_end else (
-            "validation" if index < validation_end else "test"
+    if timestamps is None:
+        time_keys = list(range(total))
+    else:
+        time_keys = []
+        for value in timestamps:
+            if not isinstance(value, datetime):
+                raise ValueError("Split timestamps must be datetime values.")
+            normalized = (
+                value.replace(tzinfo=timezone.utc)
+                if value.tzinfo is None
+                else value.astimezone(timezone.utc)
+            )
+            time_keys.append(normalized)
+        if any(left > right for left, right in zip(time_keys, time_keys[1:])):
+            raise ValueError("Rows and timestamps must be in chronological order.")
+
+    groups = []
+    start = 0
+    while start < total:
+        end = start + 1
+        while end < total and time_keys[end] == time_keys[start]:
+            end += 1
+        groups.append((start, end))
+        start = end
+
+    result = [None] * total
+    for start, end in groups:
+        midpoint = (start + end) / 2
+        split = "train" if midpoint < train_end else (
+            "validation" if midpoint < validation_end else "test"
         )
-        result.append({**row, SPLIT_COLUMN: split})
+        for index in range(start, end):
+            result[index] = {**rows[index], SPLIT_COLUMN: split}
     return result
 
 
