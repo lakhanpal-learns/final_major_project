@@ -51,12 +51,12 @@ This task implements durable event ingestion only. It does not perform fraud mod
 
 ## Prepare the offline fraud dataset (Task 11)
 
-Ensure PostgreSQL is running and the initial synthetic banking dataset has been seeded. From the repository root:
+Generate the offline synthetic cohort first if it does not exist. PostgreSQL is not required for the default path. From the repository root:
 
     cd backend
     python -m app.prepare_fraud_dataset
 
-This creates `data/processed/fraud/fraud_dataset.csv` and `fraud_dataset_metadata.json` under the backend directory. The prepared cohort excludes live simulator transactions identified by their matching transactional-outbox rows. The CSV contains leakage-controlled features, the `is_fraud` target, and a chronological train/validation/test partition. The JSON file records class counts and any split warnings.
+This creates `data/processed/fraud/fraud_dataset.csv` and `fraud_dataset_metadata.json` under the backend directory. The default source is the offline CSV export under `data/raw/synthetic/`. The loader validates its metadata, row count, account references and transaction IDs. Use `--source postgres` only when you explicitly want the legacy PostgreSQL seed cohort. The CSV contains leakage-controlled features, the `is_fraud` target, and a chronological train/validation/test partition. The JSON file records class counts and any split warnings.
 
 This command prepares data only. It does not train a model or run inference. See `documentation/phase-01/task-11-fraud-feature-engineering.md` for the feature definitions, cohort rule and limitations.
 
@@ -72,4 +72,4 @@ Default experiment parameters are 1,000 customers, 1,100 accounts, 20,000 normal
 
 Override counts and seeds with `SENTINEL_CUSTOMER_COUNT`, `SENTINEL_NORMAL_COUNT`, `SENTINEL_FRAUD_COUNT`, `SENTINEL_AML_COUNT`, `SENTINEL_REGISTRY_SEED` and `SENTINEL_TRANSACTION_SEED`. Set `SENTINEL_SYNTHETIC_OUTPUT_DIR` to change the output directory. See `documentation/phase-01/synthetic-dataset-generator-upgrade.md`.
 
-The expanded generator includes six fraud scenario families and variable-sized AML network groups. This remains synthetic rule-based data; it does not prove real-world model accuracy. Task 11 must be adapted to read this export before it can prepare features from the enlarged cohort.
+The expanded generator includes six fraud scenario families and variable-sized AML network groups. This remains synthetic rule-based data; it does not prove real-world model accuracy. Task 11 now reads this export by default, so the generated cohort is the input to feature preparation.
