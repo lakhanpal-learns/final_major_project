@@ -6,6 +6,7 @@ from collections import Counter
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 import json
+import math
 import os
 from pathlib import Path
 from typing import Any
@@ -108,7 +109,7 @@ def build_online_fraud_features(
 
     features = {
         "amount": amount,
-        "log_amount": __import__("math").log1p(amount),
+        "log_amount": math.log1p(amount),
         "currency": tx.currency,
         "transaction_type": tx.transaction_type,
         "channel": tx.channel,
