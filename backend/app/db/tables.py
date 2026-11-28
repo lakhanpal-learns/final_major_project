@@ -125,3 +125,34 @@ class FraudEventRejectionRow(Base):
     raw_value: Mapped[str] = mapped_column(Text, nullable=False)
     error: Mapped[str] = mapped_column(Text, nullable=False)
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AMLEventInboxRow(Base):
+    """Durable idempotency record for the independent AML consumer."""
+
+    __tablename__ = "aml_event_inbox"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class AMLFindingRow(Base):
+    """Explainable rule finding linked to the canonical transaction and accounts."""
+
+    __tablename__ = "aml_findings"
+    __table_args__ = (
+        UniqueConstraint("transaction_id", "typology", "rule_version", name="uq_aml_finding_tx_typology_version"),
+    )
+
+    finding_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False, index=True)
+    transaction_id: Mapped[str] = mapped_column(String(32), ForeignKey("transactions.transaction_id"), nullable=False, index=True)
+    typology: Mapped[str] = mapped_column(String(80), nullable=False, index=True)
+    subject_account_id: Mapped[str] = mapped_column(String(32), ForeignKey("accounts.account_id"), nullable=False, index=True)
+    related_account_ids: Mapped[list] = mapped_column(JSON, nullable=False)
+    evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
+    severity: Mapped[str] = mapped_column(String(20), nullable=False)
+    rule_version: Mapped[str] = mapped_column(String(40), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
