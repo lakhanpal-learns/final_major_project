@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import csv
 from collections import Counter
-from datetime import datetime
+from datetime import datetime, timezone
 import json
 import os
 from pathlib import Path
@@ -103,7 +103,7 @@ def generate_to_directory(
     ).items()))
     metadata = {
         "dataset_type": "synthetic",
-        "generated_at_utc": datetime.now().astimezone().isoformat(),
+        "generated_at_utc": datetime.now(timezone.utc).isoformat(),
         "parameters": {
             "customer_count": customer_count,
             "normal_count": normal_count,
