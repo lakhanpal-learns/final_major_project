@@ -48,6 +48,35 @@ def test_receiver_velocity_counts_prior_incoming_transfers():
     assert rows[2]["receiver_txn_count_24h"] == 2
 
 
+def test_short_window_velocity_and_recipient_concentration_features():
+    start = datetime(2025, 1, 1, 10, tzinfo=timezone.utc)
+    rows = build_fraud_feature_rows([
+        _record("one", start, receiver="B"),
+        _record("two", start + timedelta(minutes=2), receiver="B"),
+        _record("three", start + timedelta(minutes=4), receiver="C"),
+        _record("target", start + timedelta(minutes=6), receiver="D"),
+    ])
+    target = rows[-1]
+    assert target["sender_txn_count_5m"] == 1
+    assert target["sender_txn_count_15m"] == 3
+    assert target["sender_unique_recipients_1h"] == 2
+    assert target["sender_unique_recipients_24h"] == 2
+    assert target["sender_max_recipient_txn_count_24h"] == 2
+    assert target["sender_recipient_repeat_ratio_24h"] == 2 / 3
+
+
+def test_same_timestamp_events_do_not_leak_into_short_window_features():
+    start = datetime(2025, 1, 1, 10, tzinfo=timezone.utc)
+    rows = build_fraud_feature_rows([
+        _record("one", start, receiver="B"),
+        _record("two", start, receiver="C"),
+        _record("later", start + timedelta(minutes=1), receiver="D"),
+    ])
+    assert rows[0]["sender_txn_count_5m"] == 0
+    assert rows[1]["sender_txn_count_5m"] == 0
+    assert rows[2]["sender_txn_count_5m"] == 2
+
+
 def test_features_have_no_identifiers_or_non_fraud_labels():
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     row = build_fraud_feature_rows([_record("secret-id", now)])[0]
