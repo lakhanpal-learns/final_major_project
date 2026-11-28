@@ -92,6 +92,21 @@ class FraudEventInboxRow(Base):
     received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
 
+class FraudPredictionRow(Base):
+    """Immutable fraud inference result for a canonical banking transaction."""
+
+    __tablename__ = "fraud_predictions"
+
+    transaction_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    event_id: Mapped[str] = mapped_column(String(36), nullable=False, unique=True)
+    model_version: Mapped[str] = mapped_column(String(100), nullable=False)
+    fraud_probability: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
+    decision_threshold: Mapped[Decimal] = mapped_column(Numeric(10, 8), nullable=False)
+    predicted_is_fraud: Mapped[bool] = mapped_column(Boolean, nullable=False, index=True)
+    feature_snapshot: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
 class FraudEventRejectionRow(Base):
     """Durable quarantine for malformed events, keyed by Kafka source position."""
 
