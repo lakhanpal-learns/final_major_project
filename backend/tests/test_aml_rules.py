@@ -107,10 +107,9 @@ def test_does_not_use_same_timestamp_future_or_label_metadata(factory):
 def test_consumer_persists_inbox_and_findings_idempotently(factory):
     Session, now = factory
     with Session.begin() as s:
-        add_tx(s, "P1", "A1", "A4", 1000, now - timedelta(minutes=20))
-        add_tx(s, "P2", "A2", "A4", 1000, now - timedelta(minutes=10))
-        add_tx(s, "CURRENT", "A3", "A4", 1000, now)
-    event = make_event("CURRENT", "A3", "A4", 1000, now)
+        add_tx(s, "IN", "A1", "A3", 5000, now - timedelta(minutes=5))
+        add_tx(s, "CURRENT", "A3", "A4", 4900, now)
+    event = make_event("CURRENT", "A3", "A4", 4900, now)
     raw = json.dumps(event.model_dump(mode="json"))
     assert process_aml_message(Session, value=raw).startswith("processed:")
     assert process_aml_message(Session, value=raw) == "duplicate"
