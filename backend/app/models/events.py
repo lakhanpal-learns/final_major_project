@@ -1,11 +1,19 @@
 """Versioned Kafka event contracts consumed by Sentinel pipelines."""
 
+import re
 from datetime import datetime
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+
+
+def _normalize_timezone_offset(value: Any) -> Any:
+    """Normalize PostgreSQL's short UTC offset (+00) to ISO-8601 (+00:00)."""
+    if isinstance(value, str):
+        return re.sub(r"([+-][0-9]{2})$", r"\1:00", value)
+    return value
 
 
 class TransactionCreatedPayload(BaseModel):
@@ -22,6 +30,11 @@ class TransactionCreatedPayload(BaseModel):
     channel: Literal["UPI", "IMPS", "NEFT", "RTGS", "INTERNAL"]
     status: Literal["COMPLETED"]
     timestamp: datetime
+
+    @field_validator("timestamp", mode="before")
+    @classmethod
+    def normalize_timestamp_offset(cls, value: Any) -> Any:
+        return _normalize_timezone_offset(value)
 
     @model_validator(mode="after")
     def validate_distinct_accounts(self):
@@ -40,3 +53,8 @@ class TransactionCreatedEvent(BaseModel):
     event_version: Literal[1]
     occurred_at: datetime
     transaction: TransactionCreatedPayload
+
+    @field_validator("occurred_at", mode="before")
+    @classmethod
+    def normalize_occurred_at_offset(cls, value: Any) -> Any:
+        return _normalize_timezone_offset(value)

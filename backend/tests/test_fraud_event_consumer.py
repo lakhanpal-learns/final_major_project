@@ -230,3 +230,26 @@ def test_database_failure_does_not_commit_kafka_offset():
         )
 
     assert consumer.committed is None
+
+
+def test_event_contract_accepts_postgres_short_timezone_offset():
+    from app.models.events import TransactionCreatedEvent
+
+    payload = valid_payload()
+    payload["occurred_at"] = "2025-01-01T07:55:15+00"
+    payload["transaction"]["timestamp"] = "2025-01-01T07:55:15+00"
+
+    event = TransactionCreatedEvent.model_validate(payload)
+
+    assert event.occurred_at.isoformat() == "2025-01-01T07:55:15+00:00"
+    assert event.transaction.timestamp.isoformat() == "2025-01-01T07:55:15+00:00"
+
+
+def test_event_contract_preserves_standard_iso_timezone_offset():
+    from app.models.events import TransactionCreatedEvent
+
+    payload = valid_payload()
+    event = TransactionCreatedEvent.model_validate(payload)
+
+    assert event.occurred_at.utcoffset().total_seconds() == 0
+    assert event.transaction.timestamp.utcoffset().total_seconds() == 0
