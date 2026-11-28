@@ -10,7 +10,12 @@ from sqlalchemy import exists, select
 from sqlalchemy.orm import Session
 
 from app.db.tables import AccountRow, OutboxEventRow, TransactionRow
-from app.services.fraud_features import FEATURE_COLUMNS, TARGET_COLUMN, build_fraud_feature_rows
+from app.services.fraud_features import (
+    FEATURE_COLUMNS,
+    TARGET_COLUMN,
+    build_fraud_feature_rows,
+    ordered_fraud_records,
+)
 from app.services.fraud_dataset_validation import (
     SPLIT_COLUMN,
     assign_chronological_splits,
@@ -102,8 +107,11 @@ def load_synthetic_csv_records(input_dir: str | Path) -> tuple[list[dict], dict]
 def prepare_fraud_dataset_from_csv(input_dir: str | Path) -> tuple[list[dict], dict]:
     """Prepare the expanded offline synthetic cohort without requiring PostgreSQL."""
     source_records, source_metadata = load_synthetic_csv_records(input_dir)
-    feature_rows = build_fraud_feature_rows(source_records)
-    split_rows = assign_chronological_splits(feature_rows)
+    ordered_records = ordered_fraud_records(source_records)
+    feature_rows = build_fraud_feature_rows(ordered_records)
+    split_rows = assign_chronological_splits(
+        feature_rows, [record["timestamp"] for record in ordered_records]
+    )
     summary = validate_fraud_dataset(split_rows)
     summary["source_cohort"] = "offline synthetic CSV export"
     summary["source_dataset_type"] = source_metadata["dataset_type"]
@@ -156,8 +164,11 @@ def load_seed_cohort_records(session: Session) -> list[dict]:
 def prepare_fraud_dataset(session: Session) -> tuple[list[dict], dict]:
     """Prepare the PostgreSQL seed cohort (legacy/local operational source)."""
     source_records = load_seed_cohort_records(session)
-    feature_rows = build_fraud_feature_rows(source_records)
-    split_rows = assign_chronological_splits(feature_rows)
+    ordered_records = ordered_fraud_records(source_records)
+    feature_rows = build_fraud_feature_rows(ordered_records)
+    split_rows = assign_chronological_splits(
+        feature_rows, [record["timestamp"] for record in ordered_records]
+    )
     summary = validate_fraud_dataset(split_rows)
     summary["source_cohort"] = "seed transactions without matching outbox aggregate"
     summary["excluded_live_transactions"] = session.query(TransactionRow).filter(
