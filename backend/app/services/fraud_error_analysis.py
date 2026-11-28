@@ -64,18 +64,16 @@ def build_error_analysis(
 
     false_negative = (y_true == 1) & (y_pred == 0)
     false_positive = (y_true == 0) & (y_pred == 1)
-    errors = audit.reset_index(drop=True).copy()
-    feature_rows = features.reset_index(drop=True).copy()
-    errors["predicted_is_fraud"] = y_pred
-    errors["predicted_fraud_probability"] = scores
+    error_positions = np.flatnonzero(false_negative | false_positive)
+    errors = audit.iloc[error_positions].reset_index(drop=True).copy()
+    feature_rows = features.iloc[error_positions].reset_index(drop=True).copy()
+    errors["predicted_is_fraud"] = y_pred[error_positions]
+    errors["predicted_fraud_probability"] = scores[error_positions]
     errors["threshold"] = float(threshold)
-    errors["error_type"] = np.select(
-        [false_negative, false_positive],
-        ["FALSE_NEGATIVE", "FALSE_POSITIVE"],
-        default="",
+    errors["error_type"] = np.where(
+        false_negative[error_positions], "FALSE_NEGATIVE", "FALSE_POSITIVE"
     )
-    errors = errors.loc[errors["error_type"] != ""].reset_index(drop=True)
-    errors = pd.concat([errors, feature_rows.loc[errors.index].reset_index(drop=True)], axis=1)
+    errors = pd.concat([errors, feature_rows], axis=1)
 
     scenario_summary = {}
     fraud_audit = audit.loc[y_true == 1].reset_index(drop=True)
