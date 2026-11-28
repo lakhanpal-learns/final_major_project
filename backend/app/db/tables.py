@@ -3,7 +3,7 @@
 from datetime import datetime
 from decimal import Decimal
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.database import Base
@@ -76,3 +76,37 @@ class OutboxEventRow(Base):
     )
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+
+
+
+class FraudEventInboxRow(Base):
+    """Durable inbox of validated transaction events received by fraud consumer."""
+
+    __tablename__ = "fraud_event_inbox"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    transaction_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    event_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class FraudEventRejectionRow(Base):
+    """Durable quarantine for malformed events, keyed by Kafka source position."""
+
+    __tablename__ = "fraud_event_rejections"
+    __table_args__ = (
+        UniqueConstraint(
+            "source_topic", "source_partition", "source_offset",
+            name="uq_fraud_rejection_source_position",
+        ),
+    )
+
+    rejection_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    source_topic: Mapped[str] = mapped_column(String(249), nullable=False)
+    source_partition: Mapped[int] = mapped_column(Integer, nullable=False)
+    source_offset: Mapped[int] = mapped_column(Integer, nullable=False)
+    raw_value: Mapped[str] = mapped_column(Text, nullable=False)
+    error: Mapped[str] = mapped_column(Text, nullable=False)
+    received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
