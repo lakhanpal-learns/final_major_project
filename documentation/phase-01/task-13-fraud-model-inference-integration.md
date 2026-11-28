@@ -67,6 +67,6 @@ python -m app.consume_fraud
 
 ## Validation scope and limitations
 
-Automated tests use SQLite and a deterministic fake classifier to verify feature ordering, label exclusion, prediction persistence, duplicate handling, rollback behavior, and missing-ledger fail-closed behavior. These tests do not prove production throughput or real-world model performance.
+Automated tests use SQLite and a deterministic fake classifier to verify feature ordering, label exclusion, parity with the offline feature builder on a deterministic fixture, prediction persistence, duplicate handling, rollback behavior, and missing-ledger fail-closed behavior. These tests do not prove production throughput or real-world model performance.
 
-The online feature implementation should be compared against offline feature generation on the same ordered canonical ledger cohort before any production claim. PostgreSQL integration and end-to-end Kafka inference must also be exercised locally.
+PostgreSQL integration and end-to-end Kafka inference must still be exercised locally. The consumer only scores events delivered after its configured Kafka group offset; previously acknowledged inbox rows are not automatically backfilled by this task.
