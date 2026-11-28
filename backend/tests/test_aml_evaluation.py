@@ -34,14 +34,14 @@ def test_reports_per_typology_and_overall_confusion_counts():
     assert report["total_ledger_transactions"] == 10
     assert report["ledger_transaction_coverage"] == 0.5
     assert report["overall_transaction_metrics"] == {
-        "tp": 1, "fp": 2, "fn": 2, "tn": 0,
-        "precision": 1 / 3, "recall": 1 / 3,
-        "f1": 1 / 3, "specificity": 0.0,
+        "tp": 2, "fp": 1, "fn": 1, "tn": 1,
+        "precision": 2 / 3, "recall": 2 / 3,
+        "f1": 2 / 3, "specificity": 0.5,
     }
     assert report["per_typology"]["FAN_IN"]["tp"] == 1
     assert report["per_typology"]["FAN_IN"]["fn"] == 1
     assert report["per_typology"]["FAN_OUT"]["fp"] == 1
-    assert report["normal_transactions_flagged"] == 2
+    assert report["normal_transactions_flagged"] == 1
     assert len(details) == 5
 
 
