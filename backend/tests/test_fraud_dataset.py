@@ -120,3 +120,80 @@ def test_dataset_export_writes_csv_and_metadata(tmp_path):
     assert csv_path.exists()
     assert metadata_path.exists()
     assert "dataset_split" in csv_path.read_text(encoding="utf-8").splitlines()[0]
+
+
+def test_offline_synthetic_csv_source_prepares_rows_without_database(tmp_path):
+    import csv
+    import json
+    from app.services.fraud_dataset import prepare_fraud_dataset_from_csv
+
+    accounts = [
+        {"account_id": "ACC1", "account_type": "SAVINGS"},
+        {"account_id": "ACC2", "account_type": "CURRENT"},
+    ]
+    transactions = [
+        {
+            "transaction_id": f"TXN{i}",
+            "sender_account_id": "ACC1",
+            "receiver_account_id": "ACC2",
+            "amount": "100.00",
+            "currency": "INR",
+            "transaction_type": "TRANSFER",
+            "channel": "UPI",
+            "timestamp": f"2025-01-01T00:0{i}:00+00:00",
+            "sender_balance_before": "1000.00",
+            "sender_balance_after": "900.00",
+            "receiver_balance_before": "1000.00",
+            "receiver_balance_after": "1100.00",
+            "is_fraud": "True" if i == 2 else "False",
+            "is_aml_suspicious": "False",
+            "fraud_scenario": "LEAK_TEST" if i == 2 else "",
+            "aml_typology": "",
+        }
+        for i in range(1, 11)
+    ]
+    for filename, rows in (("accounts.csv", accounts), ("transactions.csv", transactions)):
+        with (tmp_path / filename).open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(handle, fieldnames=list(rows[0]))
+            writer.writeheader()
+            writer.writerows(rows)
+    (tmp_path / "metadata.json").write_text(json.dumps({
+        "dataset_type": "synthetic",
+        "counts": {"transaction_count": 10},
+        "parameters": {"transaction_seed": 99},
+    }), encoding="utf-8")
+
+    rows, summary = prepare_fraud_dataset_from_csv(tmp_path)
+    assert summary["total_rows"] == 10
+    assert summary["fraud"] == 1
+    assert summary["source_cohort"] == "offline synthetic CSV export"
+    assert "fraud_scenario" in summary["excluded_columns"]
+    assert all("fraud_scenario" not in row for row in rows)
+    assert all("is_aml_suspicious" not in row for row in rows)
+
+
+def test_offline_synthetic_csv_rejects_unknown_account_reference(tmp_path):
+    import csv
+    import json
+    from app.services.fraud_dataset import load_synthetic_csv_records
+
+    (tmp_path / "metadata.json").write_text(json.dumps({
+        "dataset_type": "synthetic", "counts": {"transaction_count": 1}
+    }), encoding="utf-8")
+    with (tmp_path / "accounts.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=["account_id", "account_type"])
+        writer.writeheader()
+        writer.writerow({"account_id": "ACC1", "account_type": "SAVINGS"})
+    transaction = {
+        "transaction_id": "TXN1", "sender_account_id": "ACC1",
+        "receiver_account_id": "MISSING", "amount": "10.00",
+        "currency": "INR", "transaction_type": "TRANSFER", "channel": "UPI",
+        "timestamp": "2025-01-01T00:00:00+00:00", "is_fraud": "False",
+    }
+    with (tmp_path / "transactions.csv").open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(handle, fieldnames=list(transaction))
+        writer.writeheader()
+        writer.writerow(transaction)
+
+    with pytest.raises(ValueError, match="Unknown account reference"):
+        load_synthetic_csv_records(tmp_path)
