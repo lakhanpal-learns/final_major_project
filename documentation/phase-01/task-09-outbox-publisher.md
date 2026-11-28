@@ -88,6 +88,47 @@ The task is not complete until tests and local integration checks demonstrate:
 
 SQLite-based unit tests do not prove PostgreSQL row-lock behavior. Local Docker integration is required for that boundary.
 
-## 8. Current implementation status
 
-This document records the approved implementation plan. Code, tests and runtime results will be added as the task progresses. Do not treat this design document as proof that the publisher is implemented or running.
+
+## 8. Initial implementation added (2026-11-28)
+
+The first implementation is now committed. It is code-complete enough for local testing, but it is **not yet runtime-verified**.
+
+### Files added or changed
+
+| File | Purpose |
+|---|---|
+| `backend/app/services/outbox_publisher.py` | Creates a Kafka producer, selects a bounded batch of pending outbox rows, publishes each event, waits for its acknowledgement, records success/failure, and provides a stoppable polling loop. |
+| `backend/app/publish_outbox.py` | Standalone process entry point; creates the database session factory and Kafka producer and handles Ctrl+C/SIGTERM shutdown. |
+| `backend/tests/test_outbox_publisher.py` | Fake-producer tests for acknowledgement, failure recording, retry, batch limits and invalid settings. |
+| `backend/requirements.txt` | Adds `kafka-python` as the Kafka client dependency. |
+| `backend/.env.example` | Documents host bootstrap address, topic, batch size, polling interval and acknowledgement timeout. |
+
+### Important implementation details
+
+- The publisher uses `SELECT ... FOR UPDATE SKIP LOCKED` and holds the database transaction open while waiting for each broker acknowledgement. This is a simple initial concurrency strategy, but it holds PostgreSQL row locks during network I/O and is not intended as a high-throughput production design.
+- Kafka message key is the transaction aggregate ID; the JSON value is the existing outbox payload.
+- Producer acknowledgement mode is `acks=all`. The event is marked published only after the send future returns successfully.
+- A send failure increments `attempts`, stores an error message and leaves `published_at` null. The next poll can retry it.
+- A crash after Kafka acknowledgement but before the PostgreSQL commit can still produce a duplicate. Delivery remains at-least-once; downstream consumers must deduplicate by event ID.
+- The unit tests use SQLite. SQLite does not prove PostgreSQL's row-lock and `SKIP LOCKED` behavior.
+
+### Run locally (PowerShell)
+
+From the backend directory, after pulling the commits:
+
+```powershell
+python -m pip install -r requirements-dev.txt
+$env:KAFKA_BOOTSTRAP_SERVERS = "localhost:29092"
+$env:KAFKA_TRANSACTION_TOPIC = "bank.transactions.v1"
+python -m app.publish_outbox
+```
+
+Stop the publisher with Ctrl+C. Run the API and the publisher in separate terminals. Do not start multiple publisher processes until the PostgreSQL integration check is complete.
+
+### Current verification status
+
+- Source files and unit tests have been added to the repository.
+- Automated test results have not yet been reported by the user.
+- Real PostgreSQL-to-Kafka publication and consumption have not yet been verified.
+- Do not mark Task 09 complete until the test suite passes and a real event is observed in Kafka.
