@@ -4,7 +4,7 @@ import logging
 import signal
 import threading
 
-from app.db.database import create_db_engine, create_session_factory
+from app.db.database import create_db_engine, create_schema, create_session_factory
 from app.services.fraud_event_consumer import (
     create_fraud_kafka_consumer,
     fraud_consumer_settings,
@@ -22,6 +22,7 @@ logger = logging.getLogger("sentinel.fraud_consumer")
 def main() -> None:
     settings = fraud_consumer_settings()
     engine = create_db_engine()
+    create_schema(engine)
     session_factory = create_session_factory(engine)
     inference_service = FraudInferenceService.from_environment()
     consumer = create_fraud_kafka_consumer(
