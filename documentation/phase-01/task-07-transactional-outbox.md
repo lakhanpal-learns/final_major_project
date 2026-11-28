@@ -190,3 +190,26 @@ The test file contains three focused tests:
 3. `test_rollback_reverts_balances_transaction_and_outbox_together` — explicitly rolls back the SQLAlchemy session and verifies both rows disappear and both balances return to their original values.
 
 The existing Task 06 tests remain in place for worker configuration and lifecycle behavior.
+
+
+## 12. Local verification results — 2026-11-28
+
+The developer ran the following from the repository root:
+
+```powershell
+python -m pytest
+```
+
+**Observed result: 34 passed.** This is the user's reported local test output. The automated outbox tests use SQLite.
+
+The user also ran a controlled integration check against the Docker PostgreSQL database. The check:
+- selected two active INR accounts;
+- persisted one ₹1.00 UPI transfer using `persist_live_transfer()`;
+- committed the SQLAlchemy session;
+- queried PostgreSQL for the matching transaction and outbox event;
+- checked the event type and transaction ID in the payload;
+- checked that fraud and AML labels were absent.
+
+**Observed result: PostgreSQL integration check passed.** Both the transaction and outbox event were found after commit. The event type was `bank.transaction.created.v1`, and `published_at` was `None`, as expected before a Kafka publisher exists. The verified transaction ID was `e5139fba38fc4f0dbfbc2e0a3c958a3d`; the event ID was `22290321-491b-4a52-9849-5765905276d8`.
+
+This confirms the database-side write path for one controlled transfer in the local PostgreSQL environment. It does not establish concurrent-load behavior, crash recovery, Kafka delivery, or production reliability. Those remain future verification tasks.
