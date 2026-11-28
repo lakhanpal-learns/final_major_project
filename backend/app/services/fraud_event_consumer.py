@@ -15,7 +15,7 @@ from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.orm import sessionmaker
 
-from app.db.tables import FraudEventInboxRow, FraudEventRejectionRow
+from app.db.tables import FraudEventInboxRow, FraudEventRejectionRow, FraudPredictionRow
 from app.models.events import TransactionCreatedEvent
 from app.services.fraud_inference_service import FraudInferenceService
 
@@ -121,6 +121,7 @@ def process_fraud_message(
 
     event_id = str(event.event_id)
     identity_conflict = False
+    inferred_existing_inbox = False
     with session_factory.begin() as session:
         existing = session.get(FraudEventInboxRow, event_id)
         if existing is not None:
@@ -130,8 +131,18 @@ def process_fraud_message(
                 and existing.event_version == event.event_version
                 and existing.payload == payload
             ):
-                return "duplicate"
-            identity_conflict = True
+                # Support safe recovery of inbox rows created before inference
+                # was deployed, or after an older consumer committed the inbox.
+                prediction = session.get(
+                    FraudPredictionRow, event.transaction.transaction_id
+                )
+                if inference_service is not None and prediction is None:
+                    inference_service.predict_and_persist(session, event)
+                    inferred_existing_inbox = True
+                else:
+                    return "duplicate"
+            else:
+                identity_conflict = True
         else:
             session.add(
                 FraudEventInboxRow(
@@ -156,6 +167,8 @@ def process_fraud_message(
             raw_value=raw_value,
             error="event_id collision: existing inbox record has different event identity",
         )
+    if inferred_existing_inbox:
+        return "predicted_existing_inbox"
     return "stored"
 
 
