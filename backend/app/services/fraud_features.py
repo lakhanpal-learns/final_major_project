@@ -39,6 +39,14 @@ def _in_prior_window(event_time: datetime, target_time: datetime, hours: int) ->
     return target_time - timedelta(hours=hours) < event_time < target_time
 
 
+def ordered_fraud_records(records: Sequence[Mapping]) -> list[Mapping]:
+    """Return records in the exact order used by feature engineering."""
+    return sorted(
+        records,
+        key=lambda item: (_utc(item["timestamp"]), str(item["transaction_id"])),
+    )
+
+
 def build_fraud_feature_rows(records: Sequence[Mapping]) -> list[dict]:
     """Build one feature row per transaction using strictly earlier events only.
 
@@ -47,10 +55,7 @@ def build_fraud_feature_rows(records: Sequence[Mapping]) -> list[dict]:
     events. IDs and labels other than the fraud target are never emitted as
     model features.
     """
-    ordered = sorted(
-        records,
-        key=lambda item: (_utc(item["timestamp"]), str(item["transaction_id"])),
-    )
+    ordered = ordered_fraud_records(records)
     outgoing: dict[str, list[tuple[datetime, float, str]]] = defaultdict(list)
     incoming: dict[str, list[datetime]] = defaultdict(list)
     output: list[dict] = []
