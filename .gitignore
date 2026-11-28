@@ -30,3 +30,6 @@ pytest.ini
 
 # Generated offline synthetic cohort (reproducible; do not commit large exports)
 /backend/data/raw/synthetic/
+
+# Generated local fraud model artifacts
+/backend/models/fraud/
