@@ -131,8 +131,12 @@ def test_dataset_export_writes_csv_and_metadata(tmp_path):
         "transaction_type": "TRANSFER", "channel": "UPI",
         "transaction_hour": 10, "day_of_week": 2,
         "sender_account_type": "SAVINGS", "receiver_account_type": "CURRENT",
+        "sender_txn_count_5m": 0, "sender_txn_count_15m": 0,
         "sender_txn_count_1h": 0, "sender_txn_count_24h": 0,
-        "sender_amount_sum_24h": 0.0, "sender_unique_recipients_24h": 0,
+        "sender_amount_sum_24h": 0.0, "sender_unique_recipients_1h": 0,
+        "sender_unique_recipients_24h": 0,
+        "sender_max_recipient_txn_count_24h": 0,
+        "sender_recipient_repeat_ratio_24h": 0.0,
         "receiver_txn_count_24h": 0, "sender_avg_amount_30d": 0.0,
         "is_fraud": 0, "dataset_split": "train",
     }]
