@@ -111,11 +111,13 @@ python -m pytest
 
 Focused tests cover:
 - Valid v1 event persisted in the fraud inbox.
-- Same event ID replayed without a duplicate row.
+- Same event ID and identical payload replayed without a duplicate row.
+- Reused event ID with a different payload quarantined as an identity conflict.
 - Malformed JSON and invalid UTF-8 durably quarantined.
 - Fraud and AML labels rejected by the strict event contract.
 - Repeated quarantine of the same Kafka source position does not create duplicate rejection rows.
 - Kafka offset commit happens after the inbox database transaction is visible.
+- Database failure leaves the Kafka offset uncommitted.
 
 SQLite tests validate persistence and consumer control flow. They do not prove PostgreSQL concurrency behavior or real Kafka broker integration. A local integration check against Docker PostgreSQL and Kafka is required before marking the task runtime-verified.
 
