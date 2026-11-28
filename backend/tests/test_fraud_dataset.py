@@ -82,6 +82,28 @@ def test_chronological_split_preserves_order_and_expected_partition_sizes():
     )
 
 
+
+def test_chronological_split_never_separates_equal_timestamp_events():
+    source = [{"value": index} for index in range(20)]
+    start = datetime(2025, 1, 1, tzinfo=timezone.utc)
+    # This three-event group crosses the nominal 70% boundary.
+    timestamps = [
+        start + timedelta(minutes=index if index < 13 else (13 if index < 16 else index))
+        for index in range(20)
+    ]
+
+    split_rows = assign_chronological_splits(source, timestamps)
+    labels_by_time = {}
+    for timestamp, row in zip(timestamps, split_rows):
+        labels_by_time.setdefault(timestamp, set()).add(row["dataset_split"])
+
+    assert all(len(labels) == 1 for labels in labels_by_time.values())
+    split_order = {"train": 0, "validation": 1, "test": 2}
+    split_indices = [split_order[row["dataset_split"]] for row in split_rows]
+    assert split_indices == sorted(split_indices)
+    assert {row["dataset_split"] for row in split_rows[13:16]} == {"validation"}
+
+
 def test_dataset_validation_rejects_unexpected_leakage_column():
     now = datetime(2025, 1, 1, tzinfo=timezone.utc)
     record = {
