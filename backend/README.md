@@ -54,6 +54,7 @@ This task implements durable event ingestion only. It does not perform fraud mod
 Generate the offline synthetic cohort first if it does not exist. PostgreSQL is not required for the default path. From the repository root:
 
     cd backend
+    python -m app.generate_synthetic_data
     python -m app.prepare_fraud_dataset
 
 This creates `data/processed/fraud/fraud_dataset.csv` and `fraud_dataset_metadata.json` under the backend directory. The default source is the offline CSV export under `data/raw/synthetic/`. The loader validates its metadata, row count, account references and transaction IDs. Use `--source postgres` only when you explicitly want the legacy PostgreSQL seed cohort. The CSV contains leakage-controlled features, the `is_fraud` target, and a chronological train/validation/test partition. The JSON file records class counts and any split warnings.
