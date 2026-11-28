@@ -319,3 +319,32 @@ def test_kafka_offset_commits_only_after_prediction_is_durable(session_factory):
 
     tp = TopicPartition("bank.transactions.v1", 1)
     assert consumer.committed[tp].offset == 56
+
+
+def test_existing_inbox_without_prediction_is_scored_on_replay(session_factory):
+    payload = seed_ledger(session_factory)
+    raw = json.dumps(payload).encode()
+
+    first = process_fraud_message(
+        session_factory,
+        topic="bank.transactions.v1",
+        partition=0,
+        offset=103,
+        value=raw,
+    )
+    assert first == "stored"
+    assert row_count(session_factory, FraudPredictionRow) == 0
+
+    inference = FraudInferenceService(FixedProbabilityModel(0.6), 0.4)
+    replay = process_fraud_message(
+        session_factory,
+        topic="bank.transactions.v1",
+        partition=0,
+        offset=103,
+        value=raw,
+        inference_service=inference,
+    )
+
+    assert replay == "predicted_existing_inbox"
+    assert row_count(session_factory, FraudEventInboxRow) == 1
+    assert row_count(session_factory, FraudPredictionRow) == 1
