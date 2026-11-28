@@ -94,3 +94,99 @@ Do not run `docker compose down -v`; that command would delete the named databas
 ## 10. Completion criteria
 
 Task 07 is complete when the user runs the full test suite locally and confirms the reported test result. Kafka integration should begin only after this database-side behavior is verified.
+
+
+## 11. Implementation source excerpts
+
+### 11.1 Outbox ORM model — `backend/app/db/tables.py`
+
+```python
+class OutboxEventRow(Base):
+    """Durable event awaiting publication to downstream messaging infrastructure."""
+
+    __tablename__ = "outbox_events"
+
+    event_id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    aggregate_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    aggregate_id: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    payload: Mapped[dict] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    published_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_error: Mapped[str | None] = mapped_column(Text, nullable=True)
+```
+
+Purpose: one row represents one event that must eventually be delivered. A null `published_at` means it is still pending. The aggregate fields let future publisher/consumer code identify the business record represented by the event.
+
+### 11.2 Atomic write — `backend/app/db/repository.py`
+
+The transfer repository operation now adds both records before the caller commits:
+
+```python
+event_id = str(uuid.uuid4())
+event_type = "bank.transaction.created.v1"
+event_payload = {
+    "event_id": event_id,
+    "event_type": event_type,
+    "event_version": 1,
+    "occurred_at": timestamp.isoformat(),
+    "transaction": {
+        "transaction_id": transaction_id,
+        "sender_account_id": sender_account_id,
+        "receiver_account_id": receiver_account_id,
+        "amount": str(transfer_amount),
+        "currency": sender.currency,
+        "transaction_type": "TRANSFER",
+        "channel": channel,
+        "status": "COMPLETED",
+        "timestamp": timestamp.isoformat(),
+    },
+}
+
+session.add(TransactionRow(
+    # transaction ledger fields and balance snapshots
+    transaction_id=transaction_id,
+    sender_account_id=sender_account_id,
+    receiver_account_id=receiver_account_id,
+    amount=transfer_amount,
+    currency=sender.currency,
+    transaction_type="TRANSFER",
+    channel=channel,
+    status="COMPLETED",
+    timestamp=timestamp,
+    sender_balance_before=sender_before,
+    sender_balance_after=sender.balance,
+    receiver_balance_before=receiver_before,
+    receiver_balance_after=receiver.balance,
+    is_fraud=False,
+    is_aml_suspicious=False,
+    fraud_scenario=None,
+    aml_typology=None,
+))
+session.add(OutboxEventRow(
+    event_id=event_id,
+    aggregate_type="transaction",
+    aggregate_id=transaction_id,
+    event_type=event_type,
+    payload=event_payload,
+    created_at=datetime.now(timezone.utc),
+    published_at=None,
+    attempts=0,
+    last_error=None,
+))
+session.flush()
+```
+
+The live engine then calls `session.commit()`. The repository does not commit independently; this keeps transaction ownership with the caller and lets both inserts and the balance updates share one commit/rollback boundary.
+
+### 11.3 Test coverage — `backend/tests/test_outbox.py`
+
+The test file contains three focused tests:
+1. `test_live_transfer_creates_matching_outbox_event` — checks a committed transfer has exactly one matching event and validates core payload fields.
+2. `test_outbox_payload_does_not_contain_training_labels_or_scenario_metadata` — guards against sending labels/scenario fields into downstream model input.
+3. `test_rollback_reverts_balances_transaction_and_outbox_together` — explicitly rolls back the SQLAlchemy session and verifies both rows disappear and both balances return to their original values.
+
+The existing Task 06 tests remain in place for worker configuration and lifecycle behavior.
