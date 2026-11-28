@@ -127,23 +127,16 @@ def _aml_group_sizes(
     min_size: int = 3,
     max_size: int = 6,
 ) -> list[int]:
-    """Partition AML events into varied network groups of three to six edges."""
-    sizes: list[int] = []
-    remaining = count
-    while remaining:
-        if remaining <= max_size:
-            sizes.append(remaining)
-            break
-        upper = min(max_size, remaining - min_size)
-        # Avoid leaving one or two events, which cannot form a valid AML motif.
-        valid_sizes = [
-            size for size in range(min_size, upper + 1)
-            if remaining - size == 0 or remaining - size >= min_size
-        ]
-        size = rng.choice(valid_sizes)
-        sizes.append(size)
-        remaining -= size
-    return sizes
+    """Partition AML events into balanced network groups of three to six edges."""
+    if count == 0:
+        return []
+    group_count = math.ceil(count / max_size)
+    base_size, remainder = divmod(count, group_count)
+    if base_size < min_size:
+        raise ValueError("AML groups must contain at least three events")
+    # Balanced deterministic groups make each typology's intended motif
+    # reproducible; the RNG parameter remains for call-site compatibility.
+    return [base_size + 1] * remainder + [base_size] * (group_count - remainder)
 
 
 def generate_transactions(
