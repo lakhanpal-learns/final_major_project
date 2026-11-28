@@ -66,7 +66,7 @@ def build_error_analysis(
     false_positive = (y_true == 0) & (y_pred == 1)
     error_positions = np.flatnonzero(false_negative | false_positive)
     errors = audit.iloc[error_positions].reset_index(drop=True).copy()
-    feature_rows = features.iloc[error_positions].reset_index(drop=True).copy()
+    feature_rows = features.iloc[error_positions].reset_index(drop=True).add_prefix("feature_")
     errors["predicted_is_fraud"] = y_pred[error_positions]
     errors["predicted_fraud_probability"] = scores[error_positions]
     errors["threshold"] = float(threshold)
