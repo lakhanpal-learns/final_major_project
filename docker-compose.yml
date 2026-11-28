@@ -57,15 +57,16 @@ services:
         condition: service_healthy
     restart: "no"
     entrypoint: ["/bin/sh", "-c"]
-    command: >
-      /opt/kafka/bin/kafka-topics.sh
-      --bootstrap-server kafka:9092
-      --create
-      --if-not-exists
-      --topic bank.transactions.v1
-      --partitions 3
-      --replication-factor 1
-      --config retention.ms=604800000
+    command:
+      - |
+        /opt/kafka/bin/kafka-topics.sh \
+          --bootstrap-server kafka:9092 \
+          --create \
+          --if-not-exists \
+          --topic bank.transactions.v1 \
+          --partitions 3 \
+          --replication-factor 1 \
+          --config retention.ms=604800000
 
 volumes:
   sentinel_postgres_data:
