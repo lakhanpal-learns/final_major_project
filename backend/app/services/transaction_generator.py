@@ -250,7 +250,7 @@ def generate_transactions(
             else:
                 pairs = [(chosen[index], chosen[index + 1]) for index in range(group_size)]
 
-        pass_through_base = rng.randrange(60_000, 100_001)
+        pass_through_base = rng.randrange(20_000, 24_001)
         for offset, (sender, receiver) in enumerate(pairs):
             if typology == "STRUCTURING":
                 # Four or more modest transfers create an aggregate pattern.
