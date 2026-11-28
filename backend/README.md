@@ -74,3 +74,15 @@ Default experiment parameters are 1,000 customers, 1,100 accounts, 20,000 normal
 Override counts and seeds with `SENTINEL_CUSTOMER_COUNT`, `SENTINEL_NORMAL_COUNT`, `SENTINEL_FRAUD_COUNT`, `SENTINEL_AML_COUNT`, `SENTINEL_REGISTRY_SEED` and `SENTINEL_TRANSACTION_SEED`. Set `SENTINEL_SYNTHETIC_OUTPUT_DIR` to change the output directory. See `documentation/phase-01/synthetic-dataset-generator-upgrade.md`.
 
 The expanded generator includes six fraud scenario families and variable-sized AML network groups. This remains synthetic rule-based data; it does not prove real-world model accuracy. Task 11 now reads this export by default, so the generated cohort is the input to feature preparation.
+
+## Train the fraud Random Forest baseline (Task 12)
+
+After preparing the Task 11 dataset, run from this directory:
+
+    cd backend
+    python -m pip install -r requirements-dev.txt
+    python -m app.train_fraud_model
+
+The trainer uses the existing chronological partitions without shuffling: it fits on train, selects a decision threshold using validation F1 (ties prefer higher precision), then evaluates the frozen threshold on test. It one-hot encodes categorical features and passes numeric features through to a Random Forest. The default output is `models/fraud/fraud_random_forest.joblib` and `models/fraud/fraud_model_metrics.json`.
+
+The report includes precision, recall, F1, average precision (PR-AUC), ROC-AUC and confusion matrix. The model and metrics are generated local artifacts and are not committed. This is a synthetic-data baseline only; its metrics do not establish real-bank performance or production readiness. See `documentation/phase-01/task-12-fraud-random-forest-training.md`.
