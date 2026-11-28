@@ -1,6 +1,6 @@
 """Relational table mappings for the canonical banking ledger and event outbox."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, JSON, Numeric, String, Text, UniqueConstraint
@@ -155,4 +155,4 @@ class AMLFindingRow(Base):
     evidence: Mapped[dict] = mapped_column(JSON, nullable=False)
     severity: Mapped[str] = mapped_column(String(20), nullable=False)
     rule_version: Mapped[str] = mapped_column(String(40), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=datetime.utcnow)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc))
