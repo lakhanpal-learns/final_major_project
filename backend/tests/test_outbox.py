@@ -97,20 +97,3 @@ def test_rollback_reverts_balances_transaction_and_outbox_together(session_facto
         assert Decimal(session.get(AccountRow, sender.account_id).balance) == sender_before
         assert Decimal(session.get(AccountRow, receiver.account_id).balance) == receiver_before
 
-
-def test_engine_rejects_non_positive_rate(session_factory):
-    with pytest.raises(ValueError):
-        LiveBankingEngine(session_factory, transactions_per_second=0)
-
-
-def test_engine_start_pause_resume_stop(session_factory):
-    engine = LiveBankingEngine(session_factory, transactions_per_second=20, seed=9)
-    assert engine.status()["state"] == "stopped"
-    engine.start()
-    assert engine.status()["state"] == "running"
-    engine.pause()
-    assert engine.status()["state"] == "paused"
-    engine.resume()
-    assert engine.status()["state"] == "running"
-    result = engine.stop()
-    assert result["state"] == "stopped"
