@@ -26,7 +26,14 @@ STRUCTURING_MIN_TOTAL = Decimal("150000.00")
 STRUCTURING_MIN_COUNT = 3
 
 
-def _utc(value: datetime) -> datetime:\n    """Normalize database/event timestamps before exact event matching."""\n    if value.tzinfo is None:\n        return value.replace(tzinfo=timezone.utc)\n    return value.astimezone(timezone.utc)\n\n\ndef _finding(typology: str, subject: str, related: set[str], evidence: dict[str, Any], severity: str = "MEDIUM") -> dict[str, Any]:
+def _utc(value: datetime) -> datetime:
+    """Normalize database/event timestamps before exact event matching."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
+def _finding(typology: str, subject: str, related: set[str], evidence: dict[str, Any], severity: str = "MEDIUM") -> dict[str, Any]:
     return {
         "finding_id": str(uuid4()),
         "typology": typology,
