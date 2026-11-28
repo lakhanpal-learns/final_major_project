@@ -1,0 +1,97 @@
+{
+  "evaluation_scope": "distinct transactions present in aml_event_inbox only",
+  "evaluated_transactions": 113,
+  "total_ledger_transactions": 1203,
+  "ledger_transaction_coverage": 0.09393183707398171,
+  "inbox_events": 113,
+  "ground_truth_aml_positive_transactions": 0,
+  "ground_truth_typology_counts": {},
+  "predicted_typology_finding_counts": {
+    "CIRCULAR_TRANSFER": 112,
+    "FAN_IN": 9,
+    "FAN_OUT": 10,
+    "LAYERING": 113,
+    "STRUCTURING": 103
+  },
+  "overall_transaction_metrics": {
+    "tp": 0,
+    "fp": 113,
+    "fn": 0,
+    "tn": 0,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "specificity": 0.0
+  },
+  "normal_transactions_flagged": 113,
+  "exact_typology_match_transactions": 0,
+  "per_typology": {
+    "STRUCTURING": {
+      "ground_truth_positive": 0,
+      "predicted_positive": 103,
+      "tp": 0,
+      "fp": 103,
+      "fn": 0,
+      "tn": 10,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 0.08849557522123894
+    },
+    "FAN_IN": {
+      "ground_truth_positive": 0,
+      "predicted_positive": 9,
+      "tp": 0,
+      "fp": 9,
+      "fn": 0,
+      "tn": 104,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 0.9203539823008849
+    },
+    "FAN_OUT": {
+      "ground_truth_positive": 0,
+      "predicted_positive": 10,
+      "tp": 0,
+      "fp": 10,
+      "fn": 0,
+      "tn": 103,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 0.911504424778761
+    },
+    "LAYERING": {
+      "ground_truth_positive": 0,
+      "predicted_positive": 113,
+      "tp": 0,
+      "fp": 113,
+      "fn": 0,
+      "tn": 0,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 0.0
+    },
+    "CIRCULAR_TRANSFER": {
+      "ground_truth_positive": 0,
+      "predicted_positive": 112,
+      "tp": 0,
+      "fp": 112,
+      "fn": 0,
+      "tn": 1,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "specificity": 0.008849557522123894
+    }
+  },
+  "limitations": [
+    "Evaluation is limited to distinct transactions present in the AML inbox.",
+    "Synthetic labels are generator-defined ground truth, not real-world confirmed laundering.",
+    "A rule finding is an investigation lead, not proof of suspicious activity.",
+    "The report measures this processed cohort and does not establish production performance."
+  ],
+  "generated_at_utc": "2026-11-28T14:06:13.150263+00:00"
+}
