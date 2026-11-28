@@ -1,9 +1,13 @@
 """Persistence operations for the canonical customer/account/transaction ledger."""
 
+from datetime import datetime, timezone
+from decimal import Decimal
+import uuid
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.tables import AccountRow, CustomerRow, TransactionRow
+from app.db.tables import AccountRow, CustomerRow, OutboxEventRow, TransactionRow
 from app.models.banking import Account, Customer
 from app.models.transaction import Transaction
 from app.services.registry import BankingRegistry
@@ -123,6 +127,7 @@ def list_transactions(session: Session) -> list[Transaction]:
         for row in rows
     ]
 
+
 def persist_live_transfer(
     session: Session,
     *,
@@ -133,15 +138,11 @@ def persist_live_transfer(
     timestamp,
     channel: str,
 ) -> None:
-    """Atomically update account balances and insert one live ledger event.
+    """Atomically update balances and insert the ledger row plus its outbox event.
 
+    The caller owns the database transaction and must commit or roll it back.
     PostgreSQL row locks serialize concurrent updates to the same accounts.
-    The caller owns the transaction and must commit or roll it back.
     """
-    from decimal import Decimal
-
-    from app.db.tables import TransactionRow
-
     if sender_account_id == receiver_account_id:
         raise ValueError("sender and receiver must be different accounts")
     transfer_amount = Decimal(amount).quantize(Decimal("0.01"))
@@ -170,6 +171,27 @@ def persist_live_transfer(
 
     sender.balance = sender_before - transfer_amount
     receiver.balance = receiver_before + transfer_amount
+
+    event_id = str(uuid.uuid4())
+    event_type = "bank.transaction.created.v1"
+    event_payload = {
+        "event_id": event_id,
+        "event_type": event_type,
+        "event_version": 1,
+        "occurred_at": timestamp.isoformat(),
+        "transaction": {
+            "transaction_id": transaction_id,
+            "sender_account_id": sender_account_id,
+            "receiver_account_id": receiver_account_id,
+            "amount": str(transfer_amount),
+            "currency": sender.currency,
+            "transaction_type": "TRANSFER",
+            "channel": channel,
+            "status": "COMPLETED",
+            "timestamp": timestamp.isoformat(),
+        },
+    }
+
     session.add(
         TransactionRow(
             transaction_id=transaction_id,
@@ -191,5 +213,17 @@ def persist_live_transfer(
             aml_typology=None,
         )
     )
+    session.add(
+        OutboxEventRow(
+            event_id=event_id,
+            aggregate_type="transaction",
+            aggregate_id=transaction_id,
+            event_type=event_type,
+            payload=event_payload,
+            created_at=datetime.now(timezone.utc),
+            published_at=None,
+            attempts=0,
+            last_error=None,
+        )
+    )
     session.flush()
-
