@@ -11,6 +11,7 @@ from sqlalchemy import func, select
 from app.db.database import create_db_engine, create_session_factory
 from app.db.tables import AMLEventInboxRow, AMLFindingRow, TransactionRow
 from app.services.aml_evaluation import build_aml_evaluation_report
+from app.services.aml_rules import RULE_VERSION
 
 
 def main() -> None:
@@ -31,7 +32,7 @@ def main() -> None:
             ).all()
             transaction_ids = [row.transaction_id for row in transactions]
             findings = session.scalars(
-                select(AMLFindingRow).where(AMLFindingRow.transaction_id.in_(transaction_ids))
+                select(AMLFindingRow).where(AMLFindingRow.transaction_id.in_(transaction_ids), AMLFindingRow.rule_version == RULE_VERSION)
             ).all() if transaction_ids else []
 
             transaction_data = [
@@ -53,6 +54,7 @@ def main() -> None:
             total_ledger_transactions=total_ledger,
             inbox_event_count=inbox_events,
         )
+        report["rule_version"] = RULE_VERSION
         report["generated_at_utc"] = datetime.now(timezone.utc).isoformat()
         report_path = output_dir / "aml_rule_evaluation.json"
         report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
@@ -67,7 +69,7 @@ def main() -> None:
             writer.writeheader()
             writer.writerows(details)
 
-        print("AML rule evaluation completed.")
+        print(f"AML rule evaluation completed for {RULE_VERSION}.")
         print(f"  evaluated transactions: {report['evaluated_transactions']}")
         print(f"  total ledger transactions: {report['total_ledger_transactions']}")
         print(f"  ledger coverage: {report['ledger_transaction_coverage']:.2%}")
