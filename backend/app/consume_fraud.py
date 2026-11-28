@@ -10,6 +10,7 @@ from app.services.fraud_event_consumer import (
     fraud_consumer_settings,
     run_fraud_consumer,
 )
+from app.services.fraud_inference_service import FraudInferenceService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -22,6 +23,7 @@ def main() -> None:
     settings = fraud_consumer_settings()
     engine = create_db_engine()
     session_factory = create_session_factory(engine)
+    inference_service = FraudInferenceService.from_environment()
     consumer = create_fraud_kafka_consumer(
         topic=settings["topic"],
         group_id=settings["group_id"],
@@ -42,7 +44,8 @@ def main() -> None:
             session_factory,
             stop_event=stop_event,
             poll_timeout_ms=settings["poll_timeout_ms"],
-            on_result=lambda result: logger.info("Fraud event ingestion: %s", result),
+            inference_service=inference_service,
+            on_result=lambda result: logger.info("Fraud event processing: %s", result),
         )
     finally:
         consumer.close()
