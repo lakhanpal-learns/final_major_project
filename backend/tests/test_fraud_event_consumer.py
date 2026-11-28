@@ -186,3 +186,47 @@ def test_consumer_commits_explicit_offset_only_after_inbox_commit(session_factor
 
     tp = TopicPartition("bank.transactions.v1", 2)
     assert consumer.committed[tp].offset == 10
+
+
+
+def test_reused_event_id_with_different_payload_is_quarantined(session_factory):
+    payload = valid_payload()
+    process_fraud_message(
+        session_factory, topic="bank.transactions.v1",
+        partition=0, offset=30, value=json.dumps(payload).encode(),
+    )
+    conflicting = {**payload, "transaction": {**payload["transaction"], "amount": "999.00"}}
+
+    result = process_fraud_message(
+        session_factory, topic="bank.transactions.v1",
+        partition=0, offset=31, value=json.dumps(conflicting).encode(),
+    )
+
+    assert result == "rejected"
+    assert count_rows(session_factory, FraudEventInboxRow) == 1
+    assert count_rows(session_factory, FraudEventRejectionRow) == 1
+
+
+def test_database_failure_does_not_commit_kafka_offset():
+    import threading
+
+    class FailingSessionFactory:
+        def begin(self):
+            raise RuntimeError("database unavailable")
+
+    payload = valid_payload()
+    stop_event = threading.Event()
+    consumer = FakeConsumer(
+        FakeMessage(json.dumps(payload).encode()),
+        stop_event,
+        session_factory=None,
+    )
+
+    with pytest.raises(RuntimeError, match="database unavailable"):
+        run_fraud_consumer(
+            consumer,
+            FailingSessionFactory(),
+            stop_event=stop_event,
+        )
+
+    assert consumer.committed is None
