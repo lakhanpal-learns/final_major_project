@@ -86,10 +86,11 @@ No new Python dependency is required; the implementation uses the standard libra
 
 ## 8. Run
 
-From the repository root, ensure PostgreSQL is running and the database has been seeded:
+From the repository root, generate the offline cohort first if it does not already exist. PostgreSQL is not required for the default path:
 
 ```powershell
 cd backend
+python -m app.generate_synthetic_data
 python -m app.prepare_fraud_dataset
 ```
 
@@ -100,8 +101,10 @@ The command writes:
 To select another input or output directory:
 
 ```powershell
-python -m app.prepare_fraud_dataset --input-dir data/raw/synthetic --output-dir data/processed/fraud\n\nTo use the legacy PostgreSQL seed cohort instead, pass `--source postgres`.
+python -m app.prepare_fraud_dataset --input-dir data/raw/synthetic --output-dir data/processed/fraud
 ```
+
+To use the legacy PostgreSQL seed cohort instead, pass `--source postgres`.
 
 The metadata file records cohort size, class counts, split counts, warnings, feature names, target name and excluded columns. The generated CSV is an artifact; it is not committed as source code.
 
