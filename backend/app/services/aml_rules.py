@@ -117,25 +117,29 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
     inbound_senders = {row.sender_account_id for row in inbound} | {sender}
     inbound_total = sum((Decimal(row.amount) for row in inbound), amount)
     if len(inbound_senders) >= MIN_COUNTERPARTIES and inbound_total >= FAN_MIN_AGGREGATE:
-        findings.append(_finding(
+        base = _finding(
             "FAN_IN", receiver, inbound_senders - {receiver},
             {"window_minutes": 60, "distinct_senders": len(inbound_senders),
              "aggregate_amount": str(inbound_total),
-             "prior_transaction_ids": [row.transaction_id for row in inbound],
-             "current_transaction_id": tx.transaction_id},
-        ))
+             "pattern_transaction_ids": [row.transaction_id for row in inbound] + [tx.transaction_id],
+             "triggering_transaction_id": tx.transaction_id},
+        )
+        for member in inbound + [canonical]:
+            findings.append({**base, "finding_id": str(uuid4()), "transaction_id": member.transaction_id})
 
     outbound = [row for row in recent if row.sender_account_id == sender]
     outbound_receivers = {row.receiver_account_id for row in outbound} | {receiver}
     outbound_total = sum((Decimal(row.amount) for row in outbound), amount)
     if len(outbound_receivers) >= MIN_COUNTERPARTIES and outbound_total >= FAN_MIN_AGGREGATE:
-        findings.append(_finding(
+        base = _finding(
             "FAN_OUT", sender, outbound_receivers - {sender},
             {"window_minutes": 60, "distinct_receivers": len(outbound_receivers),
              "aggregate_amount": str(outbound_total),
-             "prior_transaction_ids": [row.transaction_id for row in outbound],
-             "current_transaction_id": tx.transaction_id},
-        ))
+             "pattern_transaction_ids": [row.transaction_id for row in outbound] + [tx.transaction_id],
+             "triggering_transaction_id": tx.transaction_id},
+        )
+        for member in outbound + [canonical]:
+            findings.append({**base, "finding_id": str(uuid4()), "transaction_id": member.transaction_id})
 
     small_outgoing = [
         row for row in prior
@@ -150,13 +154,16 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
             and len(recipients) >= 3
             and total >= STRUCTURING_MIN_TOTAL
         ):
-            findings.append(_finding(
+            base = _finding(
                 "STRUCTURING", sender, recipients,
                 {"window_hours": 24, "transaction_count": len(rows),
                  "distinct_recipients": len(recipients), "aggregate_amount": str(total),
+                 "pattern_transaction_ids": [row.transaction_id for row in rows],
                  "maximum_single_amount": str(STRUCTURING_MAX_SINGLE),
                  "minimum_aggregate_amount": str(STRUCTURING_MIN_TOTAL)},
-            ))
+            )
+            for member in rows:
+                findings.append({**base, "finding_id": str(uuid4()), "transaction_id": member.transaction_id})
 
     # Layering requires a near-value pass-through, not merely any incoming payment.
     recent_incoming = [
@@ -174,14 +181,17 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
             pass_through.append((row, ratio))
     if pass_through:
         source_accounts = {row.sender_account_id for row, _ in pass_through}
-        findings.append(_finding(
+        base = _finding(
             "LAYERING", sender, source_accounts | {receiver},
             {"window_hours": 2,
              "matched_incoming_transaction_ids": [row.transaction_id for row, _ in pass_through],
              "forwarding_transaction_id": tx.transaction_id,
              "amount_ratio_range": [str(PASS_THROUGH_MIN_RATIO), str(PASS_THROUGH_MAX_RATIO)]},
             severity="HIGH",
-        ))
+        )
+        for member, _ratio in pass_through:
+            findings.append({**base, "finding_id": str(uuid4()), "transaction_id": member.transaction_id})
+        findings.append({**base, "finding_id": str(uuid4()), "transaction_id": canonical.transaction_id})
 
     # Current edge closes a cycle only when the prior path is chronological
     # and amounts remain within a bounded transfer ratio.
@@ -194,14 +204,16 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
         path_accounts = {path[0].sender_account_id}
         for row in path:
             path_accounts.add(row.receiver_account_id)
-        findings.append(_finding(
+        base = _finding(
             "CIRCULAR_TRANSFER", sender, path_accounts | {receiver},
             {"window_hours": 24,
              "prior_path_transaction_ids": [row.transaction_id for row in path],
              "prior_path": [[row.sender_account_id, row.receiver_account_id] for row in path],
              "closing_transaction_id": tx.transaction_id},
             severity="HIGH",
-        ))
+        )
+        for member in path + [canonical]:
+            findings.append({**base, "finding_id": str(uuid4()), "transaction_id": member.transaction_id})
 
     return findings
 
@@ -214,7 +226,7 @@ def persist_aml_findings(session: Session, event: TransactionCreatedEvent, findi
     for item in findings:
         exists = session.scalar(
             select(AMLFindingRow).where(
-                AMLFindingRow.transaction_id == event.transaction.transaction_id,
+                AMLFindingRow.transaction_id == item.get("transaction_id", event.transaction.transaction_id),
                 AMLFindingRow.typology == item["typology"],
                 AMLFindingRow.rule_version == item["rule_version"],
             )
@@ -224,7 +236,7 @@ def persist_aml_findings(session: Session, event: TransactionCreatedEvent, findi
         session.add(AMLFindingRow(
             finding_id=item["finding_id"],
             event_id=str(event.event_id),
-            transaction_id=event.transaction.transaction_id,
+            transaction_id=item.get("transaction_id", event.transaction.transaction_id),
             typology=item["typology"],
             subject_account_id=item["subject_account_id"],
             related_account_ids=item["related_account_ids"],
