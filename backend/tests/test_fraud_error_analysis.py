@@ -42,6 +42,8 @@ def test_build_error_analysis_reports_false_positives_and_negatives():
     assert set(errors["transaction_id"]) == {"t1", "t3"}
     amounts_by_id = dict(zip(errors["transaction_id"], errors["amount"]))
     assert amounts_by_id == {"t1": 100.0, "t3": 300.0}
+    feature_amounts_by_id = dict(zip(errors["transaction_id"], errors["feature_amount"]))
+    assert feature_amounts_by_id == {"t1": 100.0, "t3": 300.0}
 
 
 def test_build_error_analysis_rejects_misaligned_inputs():
