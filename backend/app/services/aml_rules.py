@@ -6,7 +6,7 @@ thresholds or a substitute for a bank's risk-based AML programme.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import timedelta
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
@@ -26,7 +26,7 @@ STRUCTURING_MIN_TOTAL = Decimal("150000.00")
 STRUCTURING_MIN_COUNT = 3
 
 
-def _finding(typology: str, subject: str, related: set[str], evidence: dict[str, Any], severity: str = "MEDIUM") -> dict[str, Any]:
+def _utc(value: datetime) -> datetime:\n    """Normalize database/event timestamps before exact event matching."""\n    if value.tzinfo is None:\n        return value.replace(tzinfo=timezone.utc)\n    return value.astimezone(timezone.utc)\n\n\ndef _finding(typology: str, subject: str, related: set[str], evidence: dict[str, Any], severity: str = "MEDIUM") -> dict[str, Any]:
     return {
         "finding_id": str(uuid4()),
         "typology": typology,
@@ -63,7 +63,7 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
         canonical.sender_account_id != tx.sender_account_id
         or canonical.receiver_account_id != tx.receiver_account_id
         or Decimal(canonical.amount) != tx.amount
-        or canonical.timestamp != tx.timestamp
+        or _utc(canonical.timestamp) != _utc(tx.timestamp)
         or canonical.status != tx.status
     ):
         raise ValueError("Kafka transaction does not match the canonical ledger")
