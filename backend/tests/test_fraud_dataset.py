@@ -140,7 +140,7 @@ def test_offline_synthetic_csv_source_prepares_rows_without_database(tmp_path):
             "currency": "INR",
             "transaction_type": "TRANSFER",
             "channel": "UPI",
-            "timestamp": f"2025-01-01T00:0{i}:00+00:00",
+            "timestamp": f"2025-01-01T00:{i:02d}:00+00:00",
             "sender_balance_before": "1000.00",
             "sender_balance_after": "900.00",
             "receiver_balance_before": "1000.00",
