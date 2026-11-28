@@ -118,6 +118,7 @@ def process_fraud_message(
         )
 
     event_id = str(event.event_id)
+    identity_conflict = False
     with session_factory.begin() as session:
         existing = session.get(FraudEventInboxRow, event_id)
         if existing is not None:
@@ -127,30 +128,29 @@ def process_fraud_message(
                 and existing.event_version == event.event_version
             ):
                 return "duplicate"
+            identity_conflict = True
+        else:
             session.add(
-                FraudEventRejectionRow(
-                    rejection_id=str(uuid4()),
-                    source_topic=topic,
-                    source_partition=partition,
-                    source_offset=offset,
-                    raw_value=raw_value[:MAX_STORED_RAW_VALUE_CHARS],
-                    error="event_id collision: existing inbox record has different event identity",
+                FraudEventInboxRow(
+                    event_id=event_id,
+                    transaction_id=event.transaction.transaction_id,
+                    event_type=event.event_type,
+                    event_version=event.event_version,
+                    payload=payload,
                     received_at=datetime.now(timezone.utc),
                 )
             )
-            return "rejected"
+            session.flush()
 
-        session.add(
-            FraudEventInboxRow(
-                event_id=event_id,
-                transaction_id=event.transaction.transaction_id,
-                event_type=event.event_type,
-                event_version=event.event_version,
-                payload=payload,
-                received_at=datetime.now(timezone.utc),
-            )
+    if identity_conflict:
+        return _store_rejection(
+            session_factory,
+            topic=topic,
+            partition=partition,
+            offset=offset,
+            raw_value=raw_value,
+            error="event_id collision: existing inbox record has different event identity",
         )
-        session.flush()
     return "stored"
 
 
