@@ -1,7 +1,7 @@
-"""Explainable, point-in-time AML typology rules for the shared bank ledger.
+"""Versioned, explainable AML typology rules for Sentinel.
 
-These configurable heuristics are an academic demonstration, not regulatory
-thresholds or a substitute for a bank's risk-based AML programme.
+V2 uses stronger multi-event evidence. These are synthetic academic heuristics,
+not regulatory thresholds or proof of money laundering.
 """
 from __future__ import annotations
 
@@ -14,20 +14,25 @@ from uuid import uuid4
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.db.tables import AccountRow, TransactionRow
+from app.db.tables import TransactionRow
 from app.models.events import TransactionCreatedEvent
 
-RULE_VERSION = "aml_rules_v1"
+RULE_VERSION = "aml_rules_v2"
 FAN_WINDOW = timedelta(minutes=60)
 LOOKBACK = timedelta(hours=24)
-MIN_COUNTERPARTIES = 3
+LAYERING_WINDOW = timedelta(hours=2)
+MIN_COUNTERPARTIES = 4
+FAN_MIN_AGGREGATE = Decimal("150000.00")
 STRUCTURING_MAX_SINGLE = Decimal("100000.00")
-STRUCTURING_MIN_TOTAL = Decimal("150000.00")
-STRUCTURING_MIN_COUNT = 3
+STRUCTURING_MIN_TOTAL = Decimal("100000.00")
+STRUCTURING_MIN_COUNT = 4
+PASS_THROUGH_MIN_RATIO = Decimal("0.80")
+PASS_THROUGH_MAX_RATIO = Decimal("1.05")
+CYCLE_MIN_RATIO = Decimal("0.80")
+CYCLE_MAX_RATIO = Decimal("1.20")
 
 
 def _utc(value: datetime) -> datetime:
-    """Normalize database/event timestamps before exact event matching."""
     if value.tzinfo is None:
         return value.replace(tzinfo=timezone.utc)
     return value.astimezone(timezone.utc)
@@ -45,23 +50,43 @@ def _finding(typology: str, subject: str, related: set[str], evidence: dict[str,
     }
 
 
-def _has_path(graph: dict[str, set[str]], start: str, target: str, max_hops: int = 4) -> list[str] | None:
-    """Return one bounded directed path, if one exists."""
-    stack = [(start, [start])]
-    while stack:
-        node, path = stack.pop()
-        if len(path) - 1 >= max_hops:
-            continue
-        for neighbour in graph.get(node, set()):
-            if neighbour == target:
-                return path + [neighbour]
-            if neighbour not in path:
-                stack.append((neighbour, path + [neighbour]))
-    return None
+def _ordered_path(
+    rows: list[TransactionRow], start: str, target: str, *, max_hops: int = 4
+) -> list[TransactionRow] | None:
+    """Find a strictly time-ordered path; one edge cannot be reused."""
+    ordered = sorted(rows, key=lambda row: (_utc(row.timestamp), row.transaction_id))
+
+    def visit(node: str, path: list[TransactionRow], seen: set[str]):
+        if len(path) >= max_hops:
+            return None
+        last_time = _utc(path[-1].timestamp) if path else None
+        for row in ordered:
+            if row.transaction_id in seen or row.sender_account_id != node:
+                continue
+            row_time = _utc(row.timestamp)
+            if last_time is not None and row_time <= last_time:
+                continue
+            if path:
+                previous_amount = Decimal(path[-1].amount)
+                current_amount = Decimal(row.amount)
+                if previous_amount <= 0:
+                    continue
+                ratio = current_amount / previous_amount
+                if not CYCLE_MIN_RATIO <= ratio <= CYCLE_MAX_RATIO:
+                    continue
+            next_path = path + [row]
+            if row.receiver_account_id == target and len(next_path) >= 2:
+                return next_path
+            result = visit(row.receiver_account_id, next_path, seen | {row.transaction_id})
+            if result:
+                return result
+        return None
+
+    return visit(start, [], set())
 
 
 def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list[dict[str, Any]]:
-    """Evaluate one canonical transfer using only strictly earlier ledger rows."""
+    """Evaluate one canonical transfer using strictly earlier completed ledger rows."""
     tx = event.transaction
     canonical = session.get(TransactionRow, tx.transaction_id)
     if canonical is None:
@@ -76,81 +101,100 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
         raise ValueError("Kafka transaction does not match the canonical ledger")
 
     event_time = _utc(tx.timestamp)
-    start = event_time - LOOKBACK
     prior = session.scalars(
         select(TransactionRow).where(
             TransactionRow.status == "COMPLETED",
-            TransactionRow.timestamp >= start,
+            TransactionRow.timestamp >= event_time - LOOKBACK,
             TransactionRow.timestamp < event_time,
         ).order_by(TransactionRow.timestamp, TransactionRow.transaction_id)
     ).all()
 
     findings: list[dict[str, Any]] = []
-    sender, receiver = tx.sender_account_id, tx.receiver_account_id
-    amount = tx.amount
+    sender, receiver, amount = tx.sender_account_id, tx.receiver_account_id, tx.amount
 
-    # Fan-in: multiple distinct accounts transfer to the same beneficiary
-    # within one hour. The current event contributes one sender.
-    fan_in = [row for row in prior if row.receiver_account_id == receiver and _utc(row.timestamp) >= event_time - FAN_WINDOW]
-    inbound_senders = {row.sender_account_id for row in fan_in} | {sender}
-    if len(inbound_senders) >= MIN_COUNTERPARTIES:
+    recent = [row for row in prior if _utc(row.timestamp) >= event_time - FAN_WINDOW]
+    inbound = [row for row in recent if row.receiver_account_id == receiver]
+    inbound_senders = {row.sender_account_id for row in inbound} | {sender}
+    inbound_total = sum((Decimal(row.amount) for row in inbound), amount)
+    if len(inbound_senders) >= MIN_COUNTERPARTIES and inbound_total >= FAN_MIN_AGGREGATE:
         findings.append(_finding(
             "FAN_IN", receiver, inbound_senders - {receiver},
             {"window_minutes": 60, "distinct_senders": len(inbound_senders),
-             "prior_transaction_ids": [row.transaction_id for row in fan_in],
+             "aggregate_amount": str(inbound_total),
+             "prior_transaction_ids": [row.transaction_id for row in inbound],
              "current_transaction_id": tx.transaction_id},
         ))
 
-    # Fan-out: one originator sends to multiple distinct beneficiaries.
-    fan_out = [row for row in prior if row.sender_account_id == sender and _utc(row.timestamp) >= event_time - FAN_WINDOW]
-    outbound_receivers = {row.receiver_account_id for row in fan_out} | {receiver}
-    if len(outbound_receivers) >= MIN_COUNTERPARTIES:
+    outbound = [row for row in recent if row.sender_account_id == sender]
+    outbound_receivers = {row.receiver_account_id for row in outbound} | {receiver}
+    outbound_total = sum((Decimal(row.amount) for row in outbound), amount)
+    if len(outbound_receivers) >= MIN_COUNTERPARTIES and outbound_total >= FAN_MIN_AGGREGATE:
         findings.append(_finding(
             "FAN_OUT", sender, outbound_receivers - {sender},
             {"window_minutes": 60, "distinct_receivers": len(outbound_receivers),
-             "prior_transaction_ids": [row.transaction_id for row in fan_out],
+             "aggregate_amount": str(outbound_total),
+             "prior_transaction_ids": [row.transaction_id for row in outbound],
              "current_transaction_id": tx.transaction_id},
         ))
 
-    # Structuring heuristic: several individually smaller transfers whose
-    # rolling aggregate crosses a configurable demonstration threshold.
     small_outgoing = [
         row for row in prior
-        if row.sender_account_id == sender and row.amount <= STRUCTURING_MAX_SINGLE
+        if row.sender_account_id == sender and Decimal(row.amount) <= STRUCTURING_MAX_SINGLE
     ]
     if amount <= STRUCTURING_MAX_SINGLE:
-        structuring_rows = small_outgoing + [canonical]
-        total = sum((Decimal(row.amount) for row in structuring_rows), Decimal("0"))
-        if len(structuring_rows) >= STRUCTURING_MIN_COUNT and total >= STRUCTURING_MIN_TOTAL:
+        rows = small_outgoing + [canonical]
+        total = sum((Decimal(row.amount) for row in rows), Decimal("0"))
+        recipients = {row.receiver_account_id for row in rows}
+        if (
+            len(rows) >= STRUCTURING_MIN_COUNT
+            and len(recipients) >= 3
+            and total >= STRUCTURING_MIN_TOTAL
+        ):
             findings.append(_finding(
-                "STRUCTURING", sender, {row.receiver_account_id for row in structuring_rows},
-                {"window_hours": 24, "transaction_count": len(structuring_rows),
-                 "aggregate_amount": str(total),
+                "STRUCTURING", sender, recipients,
+                {"window_hours": 24, "transaction_count": len(rows),
+                 "distinct_recipients": len(recipients), "aggregate_amount": str(total),
                  "maximum_single_amount": str(STRUCTURING_MAX_SINGLE),
                  "minimum_aggregate_amount": str(STRUCTURING_MIN_TOTAL)},
             ))
 
-    # Pass-through layering heuristic: the sending account received funds
-    # during the lookback and now forwards funds to another account.
-    recent_incoming = [row for row in prior if row.receiver_account_id == sender]
-    if recent_incoming:
-        source_accounts = {row.sender_account_id for row in recent_incoming}
+    # Layering requires a near-value pass-through, not merely any incoming payment.
+    recent_incoming = [
+        row for row in prior
+        if row.receiver_account_id == sender
+        and _utc(row.timestamp) >= event_time - LAYERING_WINDOW
+    ]
+    pass_through = []
+    for row in recent_incoming:
+        incoming_amount = Decimal(row.amount)
+        if incoming_amount <= 0:
+            continue
+        ratio = amount / incoming_amount
+        if PASS_THROUGH_MIN_RATIO <= ratio <= PASS_THROUGH_MAX_RATIO:
+            pass_through.append((row, ratio))
+    if pass_through:
+        source_accounts = {row.sender_account_id for row, _ in pass_through}
         findings.append(_finding(
             "LAYERING", sender, source_accounts | {receiver},
-            {"window_hours": 24, "prior_incoming_transaction_ids": [row.transaction_id for row in recent_incoming],
-             "forwarding_transaction_id": tx.transaction_id},
+            {"window_hours": 2,
+             "matched_incoming_transaction_ids": [row.transaction_id for row, _ in pass_through],
+             "forwarding_transaction_id": tx.transaction_id,
+             "amount_ratio_range": [str(PASS_THROUGH_MIN_RATIO), str(PASS_THROUGH_MAX_RATIO)]},
+            severity="HIGH",
         ))
 
-    # Circular transfer: current sender -> receiver closes a directed cycle
-    # when a bounded prior path exists from receiver back to sender.
-    graph: dict[str, set[str]] = defaultdict(set)
-    for row in prior:
-        graph[row.sender_account_id].add(row.receiver_account_id)
-    path = _has_path(graph, receiver, sender)
+    # Current edge closes a cycle only when the prior path is chronological
+    # and amounts remain within a bounded transfer ratio.
+    path = _ordered_path(prior, receiver, sender)
     if path:
+        path_accounts = {path[0].sender_account_id}
+        for row in path:
+            path_accounts.add(row.receiver_account_id)
         findings.append(_finding(
-            "CIRCULAR_TRANSFER", sender, set(path) | {receiver},
-            {"window_hours": 24, "prior_path": path,
+            "CIRCULAR_TRANSFER", sender, path_accounts | {receiver},
+            {"window_hours": 24,
+             "prior_path_transaction_ids": [row.transaction_id for row in path],
+             "prior_path": [[row.sender_account_id, row.receiver_account_id] for row in path],
              "closing_transaction_id": tx.transaction_id},
             severity="HIGH",
         ))
@@ -159,7 +203,7 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
 
 
 def persist_aml_findings(session: Session, event: TransactionCreatedEvent, findings: list[dict[str, Any]]) -> int:
-    """Insert deterministic event findings; uniqueness is enforced by the DB."""
+    """Persist idempotent findings for the active rule version."""
     from app.db.tables import AMLFindingRow
 
     inserted = 0
