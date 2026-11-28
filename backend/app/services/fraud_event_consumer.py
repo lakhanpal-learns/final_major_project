@@ -126,6 +126,7 @@ def process_fraud_message(
                 existing.transaction_id == event.transaction.transaction_id
                 and existing.event_type == event.event_type
                 and existing.event_version == event.event_version
+                and existing.payload == payload
             ):
                 return "duplicate"
             identity_conflict = True
