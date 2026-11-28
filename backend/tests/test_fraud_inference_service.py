@@ -1,6 +1,7 @@
 import json
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal
+import threading
 from uuid import uuid4
 
 import pytest
@@ -17,7 +18,7 @@ from app.db.tables import (
     TransactionRow,
 )
 from app.models.events import TransactionCreatedEvent
-from app.services.fraud_event_consumer import process_fraud_message
+from app.services.fraud_event_consumer import process_fraud_message, run_fraud_consumer
 from app.services.fraud_features import FEATURE_COLUMNS
 from app.services.fraud_inference_service import (
     FraudInferenceService,
@@ -237,3 +238,40 @@ def test_missing_canonical_transaction_fails_closed(session_factory):
     with session_factory() as session:
         with pytest.raises(ValueError, match="missing from the canonical ledger"):
             build_online_fraud_features(session, event)
+
+
+def test_kafka_offset_commits_only_after_prediction_is_durable(session_factory):
+    from kafka.structs import TopicPartition
+
+    payload = seed_ledger(session_factory)
+    stop_event = threading.Event()
+
+    class Message:
+        topic = "bank.transactions.v1"
+        partition = 1
+        offset = 55
+        value = json.dumps(payload).encode()
+
+    class Consumer:
+        committed = None
+
+        def poll(self, timeout_ms, max_records):
+            stop_event.set()
+            return {TopicPartition(Message.topic, Message.partition): [Message()]}
+
+        def commit(self, offsets):
+            assert row_count(session_factory, FraudEventInboxRow) == 1
+            assert row_count(session_factory, FraudPredictionRow) == 1
+            self.committed = offsets
+
+    consumer = Consumer()
+    inference = FraudInferenceService(FixedProbabilityModel(0.7), 0.4)
+    run_fraud_consumer(
+        consumer,
+        session_factory,
+        stop_event=stop_event,
+        inference_service=inference,
+    )
+
+    tp = TopicPartition("bank.transactions.v1", 1)
+    assert consumer.committed[tp].offset == 56
