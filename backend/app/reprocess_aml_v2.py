@@ -6,13 +6,12 @@ from __future__ import annotations
 
 import json
 from datetime import datetime
-from pathlib import Path
-
 from sqlalchemy import select
 
 from app.db.database import create_db_engine, create_session_factory
 from app.db.tables import AMLEventInboxRow
 from app.services.aml_rules import RULE_VERSION
+from app.models.events import TransactionCreatedEvent
 from app.services.aml_event_consumer import process_aml_message
 
 
@@ -25,9 +24,8 @@ def main() -> None:
             payloads = [dict(row.payload) for row in rows]
 
         def event_key(payload: dict):
-            raw = payload["transaction"]["timestamp"]
-            timestamp = datetime.fromisoformat(raw.replace("Z", "+00:00"))
-            return timestamp, payload["transaction"]["transaction_id"]
+            event = TransactionCreatedEvent.model_validate(payload)
+            return event.transaction.timestamp, event.transaction.transaction_id
 
         payloads.sort(key=event_key)
         processed = 0
