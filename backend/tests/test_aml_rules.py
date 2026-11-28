@@ -50,11 +50,12 @@ def make_event(txid, sender, receiver, amount, ts):
 def test_detects_fan_in_without_using_aml_labels(factory):
     Session, now = factory
     with Session.begin() as s:
-        add_tx(s, "P1", "A1", "A4", 1000, now - timedelta(minutes=20))
-        add_tx(s, "P2", "A2", "A4", 1000, now - timedelta(minutes=10))
-        add_tx(s, "CURRENT", "A3", "A4", 1000, now)
+        add_tx(s, "P1", "A1", "A4", 50000, now - timedelta(minutes=30))
+        add_tx(s, "P2", "A2", "A4", 50000, now - timedelta(minutes=20))
+        add_tx(s, "P3", "A3", "A4", 50000, now - timedelta(minutes=10))
+        add_tx(s, "CURRENT", "A5", "A4", 50000, now)
     with Session() as s:
-        event = make_event("CURRENT", "A3", "A4", 1000, now)
+        event = make_event("CURRENT", "A5", "A4", 50000, now)
         found = evaluate_aml_event(s, event)
     assert "FAN_IN" in {item["typology"] for item in found}
 
@@ -62,11 +63,12 @@ def test_detects_fan_in_without_using_aml_labels(factory):
 def test_detects_fan_out(factory):
     Session, now = factory
     with Session.begin() as s:
-        add_tx(s, "P1", "A1", "A2", 1000, now - timedelta(minutes=20))
-        add_tx(s, "P2", "A1", "A3", 1000, now - timedelta(minutes=10))
-        add_tx(s, "CURRENT", "A1", "A4", 1000, now)
+        add_tx(s, "P1", "A1", "A2", 50000, now - timedelta(minutes=30))
+        add_tx(s, "P2", "A1", "A3", 50000, now - timedelta(minutes=20))
+        add_tx(s, "P3", "A1", "A4", 50000, now - timedelta(minutes=10))
+        add_tx(s, "CURRENT", "A1", "A5", 50000, now)
     with Session() as s:
-        found = evaluate_aml_event(s, make_event("CURRENT", "A1", "A4", 1000, now))
+        found = evaluate_aml_event(s, make_event("CURRENT", "A1", "A5", 50000, now))
     assert "FAN_OUT" in {item["typology"] for item in found}
 
 
@@ -124,3 +126,25 @@ def test_event_must_match_canonical_ledger(factory):
     with Session() as s:
         with pytest.raises(ValueError, match="does not match"):
             evaluate_aml_event(s, make_event("CURRENT", "A1", "A3", 1000, now))
+
+ 
+def test_does_not_flag_layering_for_unrelated_amounts(factory):
+    Session, now = factory
+    with Session.begin() as s:
+        add_tx(s, "IN", "A1", "A2", 10000, now - timedelta(minutes=5))
+        add_tx(s, "OUT", "A2", "A3", 7796, now)
+    with Session() as s:
+        found = evaluate_aml_event(s, make_event("OUT", "A2", "A3", 7796, now))
+    assert "LAYERING" not in {item["typology"] for item in found}
+
+
+def test_detects_structuring_with_repeated_small_outgoing(factory):
+    Session, now = factory
+    with Session.begin() as s:
+        add_tx(s, "S1", "A1", "A2", 30000, now - timedelta(hours=3))
+        add_tx(s, "S2", "A1", "A3", 30000, now - timedelta(hours=2))
+        add_tx(s, "S3", "A1", "A4", 30000, now - timedelta(hours=1))
+        add_tx(s, "S4", "A1", "A5", 30000, now)
+    with Session() as s:
+        found = evaluate_aml_event(s, make_event("S4", "A1", "A5", 30000, now))
+    assert "STRUCTURING" in {item["typology"] for item in found}
