@@ -75,12 +75,13 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
     ):
         raise ValueError("Kafka transaction does not match the canonical ledger")
 
-    start = tx.timestamp - LOOKBACK
+    event_time = _utc(tx.timestamp)
+    start = event_time - LOOKBACK
     prior = session.scalars(
         select(TransactionRow).where(
             TransactionRow.status == "COMPLETED",
             TransactionRow.timestamp >= start,
-            TransactionRow.timestamp < tx.timestamp,
+            TransactionRow.timestamp < event_time,
         ).order_by(TransactionRow.timestamp, TransactionRow.transaction_id)
     ).all()
 
@@ -90,7 +91,7 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
 
     # Fan-in: multiple distinct accounts transfer to the same beneficiary
     # within one hour. The current event contributes one sender.
-    fan_in = [row for row in prior if row.receiver_account_id == receiver and row.timestamp >= tx.timestamp - FAN_WINDOW]
+    fan_in = [row for row in prior if row.receiver_account_id == receiver and _utc(row.timestamp) >= event_time - FAN_WINDOW]
     inbound_senders = {row.sender_account_id for row in fan_in} | {sender}
     if len(inbound_senders) >= MIN_COUNTERPARTIES:
         findings.append(_finding(
@@ -101,7 +102,7 @@ def evaluate_aml_event(session: Session, event: TransactionCreatedEvent) -> list
         ))
 
     # Fan-out: one originator sends to multiple distinct beneficiaries.
-    fan_out = [row for row in prior if row.sender_account_id == sender and row.timestamp >= tx.timestamp - FAN_WINDOW]
+    fan_out = [row for row in prior if row.sender_account_id == sender and _utc(row.timestamp) >= event_time - FAN_WINDOW]
     outbound_receivers = {row.receiver_account_id for row in fan_out} | {receiver}
     if len(outbound_receivers) >= MIN_COUNTERPARTIES:
         findings.append(_finding(
