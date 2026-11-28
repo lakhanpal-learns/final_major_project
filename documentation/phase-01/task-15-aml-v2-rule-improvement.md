@@ -7,7 +7,7 @@ point-in-time detection over the shared canonical transaction ledger.
 ## Changes
 - Introduced rule version `aml_rules_v2`; V1 findings remain stored for comparison.
 - FAN_IN and FAN_OUT now require at least four distinct counterparties within 60 minutes
-  and aggregate transfer value of at least INR 150,000.
+  and aggregate transfer value of at least INR 100,000.
 - STRUCTURING now requires at least four small outgoing transfers, at least three
   distinct recipients, and an aggregate of at least INR 100,000 in the 24-hour lookback.
 - LAYERING now requires a prior incoming transfer within two hours and a forwarding
