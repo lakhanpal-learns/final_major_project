@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 class TransactionCreatedPayload(BaseModel):
@@ -22,6 +22,12 @@ class TransactionCreatedPayload(BaseModel):
     channel: Literal["UPI", "IMPS", "NEFT", "RTGS", "INTERNAL"]
     status: Literal["COMPLETED"]
     timestamp: datetime
+
+    @model_validator(mode="after")
+    def validate_distinct_accounts(self):
+        if self.sender_account_id == self.receiver_account_id:
+            raise ValueError("sender and receiver accounts must be different")
+        return self
 
 
 class TransactionCreatedEvent(BaseModel):
