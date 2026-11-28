@@ -186,7 +186,7 @@ def run_fraud_consumer(
                 )
                 topic_partition = TopicPartition(message.topic, message.partition)
                 consumer.commit({
-                    topic_partition: OffsetAndMetadata(message.offset + 1, "")
+                    topic_partition: OffsetAndMetadata(message.offset + 1, "", -1)
                 })
                 if on_result is not None:
                     on_result(result)
