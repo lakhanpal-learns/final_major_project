@@ -119,3 +119,28 @@ Task 08 is verified only after the user starts the Compose services and confirms
 3. `bank.transactions.v1` exists with three partitions and replication factor one.
 
 Do not start implementing the outbox publisher until these checks pass.
+
+
+## 11. Local verification record (2026-11-28)
+
+The user verified the Compose deployment on Windows PowerShell from the repository root.
+
+Observed results:
+
+| Check | Observed result |
+|---|---|
+| sentinel-kafka | Up (healthy) |
+| sentinel-postgres | Up (healthy); existing service remained running |
+| sentinel-kafka-init | Exited (0) |
+| Init container logs | Kafka CLI emitted only the topic-name metric warning; no command failure |
+| Topic | bank.transactions.v1 exists |
+| Partition count | 3 |
+| Replication factor | 1 |
+| Partition leaders | 1 for partitions 0, 1 and 2 |
+| ISR | 1 for all three partitions |
+
+The initialization service was first observed exiting with code 1 because its shell command was not passed to the Kafka CLI as intended. The Compose command was corrected to use a shell block with explicit line continuations. Recreating only kafka-init then produced exit code 0.
+
+The topic had also been created manually during diagnosis before the corrected initialization service was rerun. Therefore, the successful --if-not-exists run proves the initialization command can complete against the existing topic; it does not independently prove that the topic configuration was changed by that run. The observed topic description listed min.insync.replicas=1 and did not display an explicit retention.ms override. Seven-day retention remains the intended configuration; verify or apply it separately if an explicit topic-level override is required.
+
+This verification proves local broker health, topic existence, three partitions, replication factor one, and successful one-shot initialization. It does not prove producer delivery, consumer processing, broker high availability, or crash-recovery behavior.
