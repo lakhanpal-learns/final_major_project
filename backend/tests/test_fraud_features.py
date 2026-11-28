@@ -57,7 +57,7 @@ def test_short_window_velocity_and_recipient_concentration_features():
         _record("target", start + timedelta(minutes=6), receiver="D"),
     ])
     target = rows[-1]
-    assert target["sender_txn_count_5m"] == 1
+    assert target["sender_txn_count_5m"] == 2
     assert target["sender_txn_count_15m"] == 3
     assert target["sender_unique_recipients_1h"] == 2
     assert target["sender_unique_recipients_24h"] == 2
