@@ -21,6 +21,8 @@ _FRAUD_SCENARIOS = (
     "RAPID_REPEATED_TRANSFERS",
     "UNUSUAL_TIME_CHANNEL_ACTIVITY",
     "MULTI_RECIPIENT_BURST",
+    "LOW_VALUE_HIGH_VELOCITY",
+    "REPEATED_BENEFICIARY_BURST",
 )
 _AML_TYPOLOGIES = (
     "STRUCTURING",
@@ -119,15 +121,26 @@ def _event(
     )
 
 
-def _aml_group_sizes(count: int, max_size: int = 5) -> list[int]:
-    """Partition AML events into groups of at least three transactions."""
+def _aml_group_sizes(
+    count: int,
+    rng: random.Random,
+    min_size: int = 3,
+    max_size: int = 6,
+) -> list[int]:
+    """Partition AML events into varied network groups of three to six edges."""
     sizes: list[int] = []
     remaining = count
     while remaining:
-        size = min(max_size, remaining)
-        remainder = remaining - size
-        if remainder in (1, 2):
-            size -= 3 - remainder
+        if remaining <= max_size:
+            sizes.append(remaining)
+            break
+        upper = min(max_size, remaining - min_size)
+        # Avoid leaving one or two events, which cannot form a valid AML motif.
+        valid_sizes = [
+            size for size in range(min_size, upper + 1)
+            if remaining - size == 0 or remaining - size >= min_size
+        ]
+        size = rng.choice(valid_sizes)
         sizes.append(size)
         remaining -= size
     return sizes
@@ -221,7 +234,7 @@ def generate_transactions(
     # AML patterns are multi-edge groups, not isolated suspicious transactions.
     aml_events: list[_Event] = []
     group_number = 0
-    for group_size in _aml_group_sizes(aml_count):
+    for group_size in _aml_group_sizes(aml_count, rng):
         typology = _AML_TYPOLOGIES[group_number % len(_AML_TYPOLOGIES)]
         group_number += 1
         group_time = base_time + timedelta(
@@ -271,12 +284,15 @@ def generate_transactions(
     remaining = fraud_count - overlap_count
     fraud_group_number = 0
     while remaining:
-        group_size = min(4, remaining)
+        group_size = min(rng.randint(2, 6), remaining)
         scenario = _FRAUD_SCENARIOS[fraud_group_number % len(_FRAUD_SCENARIOS)]
         fraud_group_number += 1
         sender = rng.choice(account_ids)
         available_recipients = [item for item in account_ids if item != sender]
-        if group_size <= len(available_recipients):
+        if scenario == "REPEATED_BENEFICIARY_BURST":
+            beneficiary = rng.choice(available_recipients)
+            recipients = [beneficiary] * group_size
+        elif group_size <= len(available_recipients):
             recipients = rng.sample(available_recipients, group_size)
         else:
             recipients = [rng.choice(available_recipients) for _ in range(group_size)]
@@ -289,6 +305,10 @@ def generate_transactions(
                 amount = rng.randrange(2_000, 80_001)
             elif scenario == "UNUSUAL_TIME_CHANNEL_ACTIVITY":
                 amount = rng.randrange(5_000, 250_001)
+            elif scenario == "LOW_VALUE_HIGH_VELOCITY":
+                amount = rng.randrange(100, 2_001)
+            elif scenario == "REPEATED_BENEFICIARY_BURST":
+                amount = rng.randrange(2_000, 90_001)
             else:
                 amount = rng.randrange(3_000, 120_001)
             event_time = start_time + timedelta(minutes=offset * rng.randrange(1, 4))
