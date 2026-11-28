@@ -64,7 +64,7 @@ The inbox is a processing record, not a second banking ledger. It does not copy 
 
 | File | Purpose |
 |---|---|
-| `backend/app/models/events.py` | Strict Pydantic v1 transaction event contract |
+| `backend/app/models/events.py` | Strict Pydantic v2 transaction event contract |
 | `backend/app/db/tables.py` | Fraud inbox and durable rejection table mappings |
 | `backend/app/services/fraud_event_consumer.py` | Kafka consumer setup, validation, idempotent persistence, quarantine, and manual offset commit |
 | `backend/app/consume_fraud.py` | Standalone process entry point and graceful shutdown |
@@ -119,7 +119,14 @@ Focused tests cover:
 - Kafka offset commit happens after the inbox database transaction is visible.
 - Database failure leaves the Kafka offset uncommitted.
 
-SQLite tests validate persistence and consumer control flow. They do not prove PostgreSQL concurrency behavior or real Kafka broker integration. A local integration check against Docker PostgreSQL and Kafka is required before marking the task runtime-verified.
+SQLite tests validate persistence and consumer control flow. They do not prove PostgreSQL concurrency behavior. The following local checks were also completed on 2026-11-28:
+
+- Full test suite: user-reported result of **50 passed**.
+- PostgreSQL schema creation: `Schema updated successfully`.
+- Fraud consumer connected to the local Kafka broker, joined `fraud-detector-v1`, received all three topic partition assignments, and logged `Fraud event ingestion: stored`.
+- PostgreSQL query confirmed the inbox row for event `22290321-491b-4a52-9849-5765905276d8`, referencing transaction `e5139fba38fc4f0dbfbc2e0a3c958a3d`, with event type `bank.transaction.created.v1`.
+
+This verifies one successful local Kafka-to-PostgreSQL ingestion path. It does not prove concurrency behavior, crash recovery, duplicate delivery under live broker failures, throughput, or production reliability.
 
 ## 9. Scope boundaries and known limitations
 
