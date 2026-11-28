@@ -17,6 +17,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.db.tables import FraudEventInboxRow, FraudEventRejectionRow
 from app.models.events import TransactionCreatedEvent
+from app.services.fraud_inference_service import FraudInferenceService
 
 DEFAULT_TOPIC = "bank.transactions.v1"
 DEFAULT_GROUP_ID = "fraud-detector-v1"
@@ -93,8 +94,9 @@ def process_fraud_message(
     partition: int,
     offset: int,
     value: bytes | str,
+    inference_service: FraudInferenceService | None = None,
 ) -> str:
-    """Validate and durably store one event; return stored/duplicate/rejected.
+    """Validate, persist and optionally score one event; return stored/duplicate/rejected.
 
     Database exceptions intentionally propagate. The caller must not commit the
     Kafka offset unless this function returns after its database transaction.
@@ -142,6 +144,8 @@ def process_fraud_message(
                 )
             )
             session.flush()
+            if inference_service is not None:
+                inference_service.predict_and_persist(session, event)
 
     if identity_conflict:
         return _store_rejection(
@@ -162,6 +166,7 @@ def run_fraud_consumer(
     stop_event: threading.Event | None = None,
     poll_timeout_ms: int = 1000,
     on_result: Callable[[str], None] | None = None,
+    inference_service: FraudInferenceService | None = None,
 ) -> None:
     """Consume one record per poll and commit only its durable source position.
 
@@ -183,6 +188,7 @@ def run_fraud_consumer(
                     partition=message.partition,
                     offset=message.offset,
                     value=message.value,
+                    inference_service=inference_service,
                 )
                 topic_partition = TopicPartition(message.topic, message.partition)
                 consumer.commit({
