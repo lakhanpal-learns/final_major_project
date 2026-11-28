@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -83,7 +84,7 @@ def test_rollback_reverts_balances_transaction_and_outbox_together(session_facto
             sender_account_id=sender.account_id,
             receiver_account_id=receiver.account_id,
             amount=Decimal("1.00"),
-            timestamp=__import__("datetime").datetime.now(__import__("datetime").timezone.utc),
+            timestamp=datetime.now(timezone.utc),
             channel="UPI",
         )
         session.rollback()
