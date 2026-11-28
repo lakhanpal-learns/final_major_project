@@ -257,11 +257,19 @@ def generate_transactions(
             else:
                 pairs = [(chosen[index], chosen[index + 1]) for index in range(group_size)]
 
+        pass_through_base = rng.randrange(60_000, 100_001)
         for offset, (sender, receiver) in enumerate(pairs):
             if typology == "STRUCTURING":
-                amount = rng.randrange(15_000, 95_001)
+                # Four or more modest transfers create an aggregate pattern.
+                amount = rng.randrange(25_000, 45_001)
+            elif typology in ("FAN_IN", "FAN_OUT"):
+                # AML hub motifs have five meaningful-value edges; normal
+                # hard-negative hub motifs deliberately contain only three.
+                amount = rng.randrange(45_000, 100_001)
             else:
-                amount = rng.randrange(8_000, 180_001)
+                # Layering and cycle edges preserve most of the transferred
+                # value, giving the rules a measurable pass-through signal.
+                amount = int(Decimal(pass_through_base) * (Decimal("0.97") ** offset))
             aml_events.append(
                 _event(
                     sender,
